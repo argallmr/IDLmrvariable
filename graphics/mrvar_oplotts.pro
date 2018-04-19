@@ -141,8 +141,8 @@ WIN=win
 ; Step Through Variables ///////////////////
 ;-------------------------------------------
 	nWins      = 0
-	tf_refresh = BytArr(nVars)
-	win        = ObjArr(nVars)
+	tf_refresh = BytArr(nIter)
+	win        = ObjArr(nIter)
 	FOR i = 0, nIter - 1 DO BEGIN
 		oVar   = theVars[i]
 		oGfx   = theGfx[i]

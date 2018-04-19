@@ -63,6 +63,8 @@
 ;                       to be plotted. 
 ;
 ; :Keywords:
+;       BUFFER:     in, optional, type=boolean, default=0
+;                   If set, graphics will be sent to the Z-buffer.
 ;       CURRENT:    in, optional, type=boolean, default=0
 ;                   If set, the plot will be added to the current MrGraphics window.
 ;       _REF_EXTRA: in, optional, type=any
@@ -84,8 +86,12 @@
 ;   Modification History::
 ;       2016/06/08  -   Written by Matthew Argall
 ;       2017/07/26  -   A time interval does not need to be defined (MrVar_Get/SetTRange) - MRA
+;       2018/01/24  -   If X is time, then tick labels are formatted with t_ssm_labels.
+;                           X-margins are made bigger if legend is created. - MRA
+;       2018/01/31  -   Added the BUFFER keyword. - MRA
 ;-
 function MrVar_Plot, x, y, $
+BUFFER=buffer, $
 CURRENT=current, $
 DIMENSION=dimension, $
 OVERPLOT=overplot, $
@@ -122,16 +128,21 @@ _REF_EXTRA=extra
 	
 	;Get the window
 	if n_elements(overplot) gt 0 then begin
+		IF Keyword_Set(buffer) THEN MrPrintF, 'LogWarn', 'Using existing window. Ignoring BUFFER keyword.'
 		win = overplot.window
 		tf_refresh = win -> GetRefresh()
 	endif else if keyword_set(current) then begin
+		IF Keyword_Set(buffer) THEN MrPrintF, 'LogWarn', 'Using current window. Ignoring BUFFER keyword.'
 		win        = GetMrWindows(/CURRENT)
 		tf_refresh = win -> GetRefresh()
 	endif else begin
-		win        = MrWindow(REFRESH=0)
+		win        = MrWindow(REFRESH=0, BUFFER=buffer)
 		tf_refresh = 1
 	endelse
 	win -> Refresh, /DISABLE
+	
+	;Keep track of margins
+	oxmargin = win.oxmargin
 	
 	;Plot NaNs instead of fill values
 	if oY -> HasAttr('FILLVAL') $
@@ -140,25 +151,14 @@ _REF_EXTRA=extra
 
 	;Use seconds since midnight, formatted as HH:MM:SS
 	if obj_isa(oX, 'MrTimeVar') then begin
-		trange = MrVar_GetTRange()
-		x_data = oX -> GetData('SSM')
-		if array_equal(trange, '') $
-			then tr_ssm = [x_data[0], x_data[-1]] $
-			else tr_ssm = MrVar_GetTRange('SSM')
-		dt = tr_ssm[1] - tr_ssm[0]
-
-		;Less than 60 seconds
-		if dt le 60.0 then begin
-			xrange      = tr_ssm - floor(tr_ssm[0])
-			xtitle      = trange[0] eq '' ? 'Time (s)' : 'Seconds past ' + strmid(trange[0], 0, 10) + ' ' + strmid(trange[0], 11, 8)
-			xtickformat = ''
-			x_data      -= floor(tr_ssm[0])
-
-		;More than 60 seconds
-		endif else begin
-			xtitle      = 'Time from ' + oX['DATA', 0, 0:9]
-			xtickformat = 'time_labels'
-		endelse
+		x_data        = oX -> GetData('SSM')
+		t_extra       = MrVar_TTicks(LABEL=t_label)
+		xticks        = t_extra.xticks
+		xminor        = t_extra.xminor
+		xtickv        = t_extra.xtickv
+		xrange        = t_extra.xrange
+		xtickformat   = 't_ssm_ticks' ;time_labels
+		xtitle        = '!CTime from ' + oX['DATA', 0, 0:9]
 	endif else begin
 		x_data = oX['DATA']
 	endelse
@@ -193,7 +193,8 @@ _REF_EXTRA=extra
 	MrVar_SetAxisProperties, p1, oY, /YAXIS
 	
 	;Set user-given properties
-	p1 -> SetProperty, XRANGE=xrange, XTITLE=xtitle, XTICKFORMAT=xtickformat
+	p1 -> SetProperty, XTICKFORMAT=xtickformat, XMINOR=xminor, XRANGE=xrange, XTICKS=xticks, XTICKV=xtickv, XTITLE=xtitle
+;	p1 -> SetProperty, XRANGE=xrange, XTITLE=xtitle, XTICKFORMAT=xtickformat
 	if n_elements(extra) gt 0 then p1 -> SetProperty, _STRICT_EXTRA=extra
 
 ;-------------------------------------------
@@ -211,6 +212,9 @@ _REF_EXTRA=extra
 			                   LINESTYLE  = 'None', $
 			                   NAME       = 'Lgd: ' + oY.name, $
 			                   TARGET     = p1 )
+			                   
+			;Make the legend a bit bigger
+			oxmargin[1] >= 6
 		
 		;Add a legend item
 		endif else begin
@@ -227,6 +231,9 @@ _REF_EXTRA=extra
 ;-------------------------------------------
 ; Finish ///////////////////////////////////
 ;-------------------------------------------
+	;Update the margins
+	IF ~Array_Equal(win.oxmargin, oxmargin) $
+		THEN win.oxmargin >= oxmargin
 	
 	;Return the plot
 	if tf_refresh then p1 -> Refresh

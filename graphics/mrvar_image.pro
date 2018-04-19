@@ -73,6 +73,7 @@
 ;   Modification History::
 ;       2016/07/06  -   Written by Matthew Argall
 ;       2017/07/26  -   A time interval does not need to be defined (MrVar_Get/SetTRange) - MRA
+;       2018/02/05  -   If X is time, then tick labels are formatted with t_ssm_labels. - MRA
 ;-
 function MrVar_Image, z, x, y, $
 CURRENT=current, $
@@ -132,30 +133,19 @@ _REF_EXTRA=extra
 	win -> Refresh, /DISABLE
 	
 	;Make room for the colorbar
-	oxmargin = win.oxmargin
-	if oxmargin[1] lt 15 then win.oxmargin = [oxmargin[0], 15]
+	oxmargin    = win.oxmargin
+	oxmargin[1] >= 15
 
 	;Use seconds since midnight, formatted as HH:MM:SS
 	if obj_isa(oX, 'MrTimeVar') then begin
-		trange = MrVar_GetTRange()
-		x_data = oX -> GetData('SSM')
-		if array_equal(trange, '') $
-			then tr_ssm = [x_data[0], x_data[-1]] $
-			else tr_ssm = MrVar_GetTRange('SSM')
-		dt = tr_ssm[1] - tr_ssm[0]
-
-		;Less than 60 seconds
-		if dt lt 60.0 then begin
-			xrange      = tr_ssm - floor(tr_ssm[0])
-			xtitle      = trange[0] eq '' ? 'Time (s)' : 'Seconds past ' + strmid(trange[0], 0, 10) + ' ' + strmid(trange[0], 11, 8)
-			xtickformat = ''
-			x_data      -= floor(tr_ssm[0])
-
-		;More than 60 seconds
-		endif else begin
-			xtitle      = 'Time from ' + oX['DATA', 0, 0:9]
-			xtickformat = 'time_labels'
-		endelse
+		x_data        = oX -> GetData('SSM')
+		t_extra       = MrVar_TTicks(LABEL=t_label)
+		xticks        = t_extra.xticks
+		xminor        = t_extra.xminor
+		xtickv        = t_extra.xtickv
+		xrange        = t_extra.xrange
+		xtickformat   = 't_ssm_ticks' ;time_labels
+		xtitle        = '!CTime from ' + oX['DATA', 0, 0:9]
 	endif else begin
 		x_data = oX['DATA']
 	endelse
@@ -317,7 +307,8 @@ _REF_EXTRA=extra
 	MrVar_SetAxisProperties, im, oY, /YAXIS
 	
 	;Set user-given properties
-	im -> SetProperty, XTITLE=xtitle, XTICKFORMAT=xtickformat
+	im -> SetProperty, XTICKFORMAT=xtickformat, XMINOR=xminor, XRANGE=xrange, XTICKS=xticks, XTICKV=xtickv, XTITLE=xtitle
+;	im -> SetProperty, XTITLE=xtitle, XTICKFORMAT=xtickformat
 	if n_elements(extra) gt 0 then im -> SetProperty, _STRICT_EXTRA=extra
 
 ;-------------------------------------------
@@ -333,6 +324,9 @@ _REF_EXTRA=extra
 ;-------------------------------------------
 ; Finish ///////////////////////////////////
 ;-------------------------------------------
+	;Adjust margins
+	IF ~Array_Equal(win.oxmargin, oxmargin) $
+		THEN win.oxmargin >= oxmargin
 	
 	;Return the plot
 	if tf_refresh then im -> Refresh

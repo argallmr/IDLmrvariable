@@ -46,6 +46,8 @@
 ;                       MrVar_PlotTS will be used.
 ;
 ; :Params:
+;       BUFFER:     in, optional, type=boolean, default=0
+;                   If set, graphics will be sent to the Z-buffer.
 ;       LAYOUT:     in, optional, type=intarr(2), default=[1\,nVars]
 ;                   The number of columns and rows in the plot layout: [nCols, nRows].
 ;                       `VARIABLES` will plotted from right to left then from top to
@@ -84,8 +86,12 @@
 ;       2016/10/03  -   Added the LAYOUT and NO_REFRESH keywords. - MRA
 ;       2017/03/09  -   Added the CURRENT keyword. - MRA
 ;       2017/08/02  -   VARIABLES can be MrTimeSeries objects. - MRA
+;       2018/01/22  -   Make use of MrVar_TTicks to format x-tick labels. Adjust x-margins
+;                           if a time-label is added to the plot. - MRA
+;       2018/01/31  -   Added the BUFFER keyword. - MRA
 ;-
 function MrVar_PlotTS, variables, $
+BUFFER=buffer, $
 CURRENT=current, $
 LAYOUT=layout, $
 NO_REFRESH=no_refresh, $
@@ -140,16 +146,27 @@ YSIZE=ysize
 ;-------------------------------------------
 	;Get the window
 	if keyword_set(current) then begin
+		IF Keyword_Set(buffer) THEN MrPrintF, 'LogWarn', 'Using current window. Ignoring BUFFER keyword.'
 		win        = GetMrWindows(/CURRENT)
 		tf_refresh = win -> GetRefresh()
 		win       -> Refresh, /DISABLE
 	endif else begin
-		win = MrWindow( LAYOUT  = layout, $
+		win = MrWindow( BUFFER  = buffer, $
+		                LAYOUT  = layout, $
 		                XSIZE   = xsize, $
 		                YGAP    = 0.5, $
 		                YSIZE   = ysize, $
 		                REFRESH = 0 )
 	endelse
+
+;-------------------------------------------
+; Determine Tick Marks /////////////////////
+;-------------------------------------------
+	;Determine where tick marks are placed
+	t_extra = MrVar_TTIcks(LABEL=t_label)
+	
+	;Keep track of margins
+	oxmargin = win.oxmargin
 
 ;-------------------------------------------
 ; Step Through Each Variable ///////////////
@@ -163,12 +180,6 @@ YSIZE=ysize
 		;Get the variable
 		oVar = nVars eq 1 ? allVars : allVars[i]
 
-		;Skip the variable if it is not in the cache
-;		if count eq 0 then begin
-;			MrPrintF, 'LogWarn', 'Variable not found: "' + variables[i] + '".'
-;			continue
-;		endif
-
 	;-------------------------------------------
 	; Unknown Types ////////////////////////////
 	;-------------------------------------------
@@ -180,7 +191,7 @@ YSIZE=ysize
 	;-------------------------------------------
 		endif else if oVar -> HasAttr('DEPEND_1') then begin
 			gfx = MrVar_Image(oVar, /CURRENT)
-		
+			
 	;-------------------------------------------
 	; Plot /////////////////////////////////////
 	;-------------------------------------------
@@ -193,14 +204,33 @@ YSIZE=ysize
 		endif else begin
 			MrPrintF, 'LogErr', 'Variable must have a DEPEND_0 attribute: "' + oVar.name + '".'
 		endelse
-
+	
 	;-------------------------------------------
 	; Prettify /////////////////////////////////
 	;-------------------------------------------
 		if iRow gt 0       then title       = ''     else void = temporary(title)
-		if iRow lt nVars-1 then xtickformat = '(a1)' else void = temporary(xtickformat)
-		if iRow lt nVars-1 then xtitle      = ''     else void = temporary(xtitle)
-		gfx -> SetProperty, TITLE=title, XTICKFORMAT=xtickformat, XTITLE=xtitle
+;		if iRow lt nVars-1 then xtickformat = '(a1)' else void = temporary(xtickformat)
+;		if iRow lt nVars-1 then xtitle      = ''     else void = temporary(xtitle)
+		gfx -> SetProperty, TITLE       = title, $
+		                    XMINOR      = t_extra.xminor, $
+		                    XRANGE      = t_extra.xrange, $
+		                    XTICKFORMAT = (iRow lt nVars-1 ? '(a1)' : ''), $
+		                    XTICKV      = t_extra.xtickv, $
+		                    XTICKNAME   = (iRow lt nVars-1 ? '' : t_extra.xtickname), $
+		                    XTICKS      = t_extra.xticks, $
+		                    XTITLE      = (iRow lt nVars-1 ? '' : '!CTime (UT)')
+
+	;-------------------------------------------
+	; Create a Label ///////////////////////////
+	;-------------------------------------------
+		if iRow eq nVars-1 && iCol eq 0 then begin
+			xyo1 = MrText( 0.0, 0.0, t_label, $
+			               ALIGNMENT          = 1.0, $
+			               /RELATIVE, $
+			               TARGET             = gfx, $
+			               VERTICAL_ALIGNMENT = 1.0 )
+			oxmargin[0] >= 12
+		endif
 	endfor
 
 ;-------------------------------------------
@@ -215,6 +245,9 @@ YSIZE=ysize
 	;     here will not account for that.
 ;	trange  = MrVar_GetTRange('SSM')
 ;	win    -> SetGlobal, XRANGE=trange
+
+	IF ~Array_Equal(win.oxmargin, oxmargin) $
+		THEN win.oxmargin >= oxmargin
 	
 	;Return the plot
 	if tf_refresh then win -> Refresh
