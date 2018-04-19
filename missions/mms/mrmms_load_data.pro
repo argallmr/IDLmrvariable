@@ -54,6 +54,8 @@
 ;       2016/10/06  -   Added the SUFFIX keyword. Renamed Epoch variables are now
 ;                           reflected in VARNAMES. - MRA
 ;       2016/11/19  -   Load ancillary data products. - MRA
+;       2017/01/24  -   Fix indexing error when multiple files are found for more than
+;                           one file type. - MRA
 ;-
 ;*****************************************************************************************
 ;+
@@ -262,7 +264,6 @@ _REF_EXTRA=extra
 ;-----------------------------------------------------
 ; Web \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
-
 	;Change direstories to the proper request
 	;   - Always start with a new request.
 	!MrMMS -> SetProperty, /RESET_PATH, $
@@ -296,7 +297,7 @@ _REF_EXTRA=extra
 		                VARFORMAT = varformat, $
 		                VARNAMES  = varnames
 	endif
-
+	
 ;-----------------------------------------------------
 ; Read Data Files \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
@@ -318,7 +319,7 @@ _REF_EXTRA=extra
 		;Step through each file type
 		for i = 0, nUniq - 1 do begin
 			;Find similar file types
-			iFiles = where(strmid( fbase, 0, strlen(fType[i])) eq fTYpe[i], nFiles)
+			iFiles = where(strmid( fbase, 0, strlen(fType[iUniq[i]])) eq fType[iUniq[i]], nFiles)
 			if nFiles eq 0 then continue
 			
 			;
