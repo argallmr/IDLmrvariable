@@ -123,7 +123,7 @@
 ;       _REF_EXTRA:     in, optional, type=any
 ;                       Any keyword accepted by MrTimeSeries::Init is also accepted here.
 ;-
-FUNCTION MrDist4D::INIT, time, dist4D, phi, theta, energy, $
+FUNCTION MrDist4D_v1::INIT, time, dist4D, phi, theta, energy, $
 DEGREES=degrees, $
 ELEVATION=elevation, $
 MASS=mass, $
@@ -184,7 +184,7 @@ END
 ;+
 ;   Clean up after the object is destroyed
 ;-
-PRO MrDist4D::CLEANUP
+PRO MrDist4D_v1::CLEANUP
 	Compile_Opt idl2
 	On_Error, 2
 	
@@ -230,7 +230,7 @@ END
 ; :Returns:
 ;       NEW_FLUX:       Distribution with new units.
 ;-
-PRO MrDist4D::ConvertUnits, to_units
+PRO MrDist4D_v1::ConvertUnits, to_units
 	Compile_Opt idl2
 	On_Error, 2
 
@@ -339,7 +339,7 @@ END
 ; :Returns:
 ;       DE:             Spacing of the energy bins.
 ;-
-FUNCTION MrDist4D::DeltaE, energy
+FUNCTION MrDist4D_v1::DeltaE, energy
 	Compile_Opt idl2
 	On_Error, 2
 
@@ -372,7 +372,6 @@ FUNCTION MrDist4D::DeltaE, energy
 	RETURN, dE
 END
 
-
 ;+
 ;   Compute the 0th moment of the distribution, density.
 ;
@@ -386,7 +385,7 @@ END
 ;       ON:             out, required, type=MrScalarTS
 ;                       Density as a function of time.
 ;-
-FUNCTION MrDist4D::Density, $
+FUNCTION MrDist4D_v1::Density, $
 CACHE=cache, $
 NAME=name
 	Compile_Opt idl2
@@ -395,88 +394,29 @@ NAME=name
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
+		IF N_Elements(oDist3D) GT 0 THEN Obj_Destroy, oDist3D
+		IF N_Elements(oN)      GT 0 THEN Obj_Destroy, oN
 		RETURN, !Null
 	ENDIF
 	
 	;Defaults
 	tf_cache = Keyword_Set(cache)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Density'
-	
-	;Must integrate over phase space
-	IF self.units NE 'PSD' THEN Message, 'Units must be "PSD". They are "' + self.units + '".'
-	
-	;Constants
-	deg2rad = !dpi / 180D
-	q       = MrConstants('q')
-	eV2J    = MrConstants('eV2J')
-	dims    = Size(self.oDist, /DIMENSIONS)
-	
-;-----------------------------------------------------
-; Integrate over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract phi and the bin sizes
-	oPhi = self.oDist['DEPEND_1']
-	dPhi = (oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR'])['DATA'] * deg2rad
 
-	;Integrate
-	ftemp = Total( self.oDist['DATA'] * Rebin(dPhi, dims), 2 )
-	
-	;Clean up
-	dPhi = !Null
-	
-;-----------------------------------------------------
-; Integrate over Theta \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract theta and the bin sizes
-	oTheta = self.oDist['DEPEND_2']
-	dTheta = (oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR'])['DATA'] * deg2rad
+	;Allocate memory
+	nTime = self.oDist -> GetNPts()
+	N     = FltArr( nTime )
 
-	;Integrate
-	ftemp = Total( ftemp * Rebin(Sin(oTheta['DATA']*deg2rad) * dTheta, dims[[0,2,3]]), 2)
-	
-	;Clean up
-	dTheta = !Null
-	
-;-----------------------------------------------------
-; Integrate over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract energy and the bin sizes
-	oEnergy  = self.oDist['DEPEND_3']
-	oDEnergy = oEnergy['DELTA_PLUS_VAR'] + oEnergy['DELTA_MINUS_VAR']
-	
-	;
-	; Convert energy to velocity
-	;   - E  = 1/2 * m * v^2
-	;   - dE = m * v * dv
-	;   - v  = Sqrt( 2 * E / m )
-	;   - dv = dE / (m v)
-	;
-	
-	; Convert energy from eV to J
-	v    = Sqrt(2.0 * eV2J * oEnergy['DATA'] / self.mass)
-	dv   = eV2J * oDEnergy['DATA'] / (self.mass * v)
-	
-	;Clean up
-	Obj_Destroy, oDEnergy
-	
-	;SPACECRAFT POTENTIAL
-	IF N_Elements(self.oVsc) GT 0 THEN BEGIN
-		;Sign is charge dependent. E = q * V = 1/2 * m * v^2
-		signQ = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
-		vsc   = Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass )
-		VM    = v^2 * (1 + signQ * (vsc^2 / v^2))
-	ENDIF ELSE BEGIN
-		VM = v^2
-	ENDELSE
-	
-	;Integrate velocity
-	;   - V is in m/s while f is in s^3/cm^6
-	;   - v^2 * dv --> (m/s)^3  --> (cm/s)^3 * 1e6
-	N = Total( Temporary(ftemp) * Temporary(v) * Sqrt(VM) * Temporary(dv), 2 ) * 1e6
+	;Step over each time
+	FOR i = 0, nTime - 1 DO BEGIN
+		oDist3D = self -> GetDist3D(i)
+		
+		;Reduce the distribution
+		N[i] = oDist3D -> Density()
 
-;-----------------------------------------------------
-; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
+		;Destroy the object
+		Obj_Destroy, oDist3D
+	ENDFOR
 	
 	;Energy-time spectrogram
 	oN = MrScalarTS( self.oDist['TIMEVAR'], N, $
@@ -509,7 +449,7 @@ END
 ;       OS:             out, required, type=MrScalarTS
 ;                       Entropy as a function of time.
 ;-
-FUNCTION MrDist4D::Entropy, $
+FUNCTION MrDist4D_v1::Entropy, $
 CACHE=cache, $
 NAME=name
 	Compile_Opt idl2
@@ -518,103 +458,32 @@ NAME=name
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
-		IF N_Elements(oS) GT 0 THEN Obj_Destroy, oS
+		IF N_Elements(oDist3D) GT 0 THEN Obj_Destroy, oDist3D
+		IF N_Elements(oS)      GT 0 THEN Obj_Destroy, oS
 		RETURN, !Null
 	ENDIF
 	
 	;Defaults
 	tf_cache = Keyword_Set(cache)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Entropy'
-	
-	;Must integrate over phase space
-	IF self.units NE 'PSD' THEN Message, 'Units must be "PSD". They are "' + self.units + '".'
-	
-	;Convert to radians
-	deg2rad = !dpi / 180D
-	dims    = Size(self.oDist, /DIMENSIONS)
-	q       = MrConstants('q')
-	eV2J    = MrConstants('eV2J')
-	tf_vsc  = N_Elements(self.oVsc) GT 0
-	
-	;Check for zeros -- mess with ALog
-	tf_nan = 0B
-	iZero  = self.oDist -> Where(0, /EQUAL, COUNT=nZero)
-	IF nZero GT 0 THEN BEGIN
-		self.oDist[iZero] = !Values.F_NaN
-		tf_nan = 1B
-	ENDIF
 
-;-----------------------------------------------------
-; Integration Over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	
-	;Extract phi and the bin sizes
-	oPhi = self.oDist['DEPEND_1']
-;	phi  = Rebin(oPhi['DATA'] * deg2rad, dims)
-	dPhi = Rebin((oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR'])['DATA'] * deg2rad, dims)
-	
-	;Integrate
-	ftemp = Total( self.oDist['DATA'] * ALog(self.oDist['DATA']) * Temporary(dPhi), 2, NAN=tf_nan)
-	
-	;Put zeros back
-	IF nZero GT 0 THEN self.oDist[iZero] = 0.0
-	
-;-----------------------------------------------------
-; Integration Over Theta \\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract theta and the bin sizes
-	oTheta = self.oDist['DEPEND_2']
-	theta  = Rebin(oTheta['DATA'] * deg2rad, dims[[0,2,3]])
-	dTheta = Rebin((oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR'])['DATA'] * deg2rad, dims[[0,2,3]])
-	
-	;Integrate Theta
-	ftemp  = Total( Temporary(ftemp) * Sin(Temporary(theta)) * Temporary(dTheta), 2, NAN=tf_nan)
+	;Allocate memory
+	nTime = self.oDist -> GetNPts()
+	S     = FltArr( nTime )
 
-;-----------------------------------------------------
-; Integration Over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract phi and the bin sizes
-	oEnergy = self.oDist['DEPEND_3']
-	energy  = oEnergy['DATA']
-	dEnergy = (oEnergy['DELTA_PLUS_VAR'] + oEnergy['DELTA_MINUS_VAR'])['DATA']
-	
-	;VELOCITY
-	;
-	; Convert energy to velocity
-	;   - E  = 1/2 * m * v^2
-	;   - dE = m * v * dv
-	;   - v  = Sqrt( 2 * E / m )
-	;   - dv = dE / (m v)
-	;
-	
-	; Convert energy from eV to J
-	v    = sqrt(2.0 * eV2J * Temporary(energy) / self.mass)
-	dv   = eV2J * Temporary(dEnergy) / (self.mass * v)
-	
-	;SPACECRAFT POTENTIAL
-	IF tf_vsc THEN BEGIN
-		sgn  = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
-		vsc  = Sqrt( 2.0 * q / self.mass * (self.oVsc['DATA']) )
-	ENDIF
-	
-	;Integrate velocity
-	;   - Sign is charge dependent. E = q * V = 1/2 * m * v^2
-	;   - V is in m/s while f is in s^3/cm^6
-	;   - f --> s^3/cm^6  --> s^3/m^6 * 1e12
-	IF tf_Vsc $
-		THEN H = Total( ftemp * v * Sqrt(v^2 + sgn*vsc^2) * dv, 2, NAN=tf_nan ) * 1e12 $
-		ELSE H = Total( ftemp * v^2 * dv, 2, NAN=tf_nan ) * 1e12
-	
-	ftemp = !Null
-	v     = !Null
-	dv    = !Null
-	vsc   = !Null
+	;Step over each time
+	FOR i = 0, nTime - 1 DO BEGIN
+		oDist3D = self -> GetDist3D(i)
+		
+		;Reduce the distribution
+		S[i] = oDist3D -> Entropy()
 
-;-----------------------------------------------------
-; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------	
+		;Destroy the object
+		Obj_Destroy, oDist3D
+	ENDFOR
+	
 	;Energy-time spectrogram
-	oS = MrScalarTS( self.oDist['TIMEVAR'], -MrConstants('k_B') * H, $
+	oS = MrScalarTS( self.oDist['TIMEVAR'], S, $
 	                 CACHE = tf_cache, $
 	                 NAME  = name, $
 	                 /NO_COPY )
@@ -635,71 +504,9 @@ END
 
 
 ;+
-;   Compute entropy flux.
-;
-; :Keywords:
-;       CACHE:          in, optional, type=boolean, default=0
-;                       If set, the output is added to the variable cache.
-;       NAME:           in, optional, type=integer
-;                       Name to be given to the variable object.
-;
-; :Returns:
-;       OS:             out, required, type=MrScalarTS
-;                       Entropy as a function of time.
-;-
-FUNCTION MrDist4D::EntropyFlux, $
-CACHE=cache, $
-NAME=name
-	Compile_Opt idl2
-	
-	Catch, the_error
-	IF the_error NE 0 THEN BEGIN
-		Catch, /CANCEL
-		MrPrintF, 'LogErr'
-		IF N_Elements(oS) GT 0 THEN Obj_Destroy, oS
-		RETURN, !Null
-	ENDIF
-	
-	;Defaults
-	tf_cache = Keyword_Set(cache)
-	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_EntropyFlux'
-	
-	;Must integrate over phase space
-	IF self.units NE 'PSD' THEN Message, 'Units must be "PSD". They are "' + self.units + '".'
-	
-	;Compute entropy and velocity
-	;   - Convert velocity from km/s to m/s
-	oS = self -> Entropy()
-	oV = self -> Velocity()
-	
-	;Multiply each component of V by S
-	oSf = oV * oS
-	oSf -> SetName, name
-	IF Keyword_Set(cache) THEN oSf -> Cache
-
-;-----------------------------------------------------
-; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------	
-	
-	;Attributes
-	oSf['CATDESC']       = 'Entropy flux computed from the 3D velocity space integral ' + $
-	                      'of the distribution function.'
-	oSf['LOG']           = 1B
-	oSf['PLOT_TITLE']    = 'Entropy Flux'
-	oSf['UNITS']         = 'J/K/s/m^2'
-	oSf['TITLE']         = 'S!C(J / K / m^2 / s)'
-	oSf['SI_CONVERSION'] = '>'
-	oSf['VAR_NOTES']     = 'S = -kH, where k is Boltzman constant and H is the Boltzman ' + $
-	                       'H-function: \Integral V f ln(f) d^3v'
-	
-	RETURN, oSf
-END
-
-
-;+
 ;   Display the energy bins
 ;-
-PRO MrDist4D::EBins
+PRO MrDist4D_v1::EBins
 	Compile_Opt idl2
 	On_Error, 2
 
@@ -737,7 +544,7 @@ END
 ;       OESPEC:         out, required, type=MrTimeSeries
 ;                       A 1D distribution in time, averaged over polar and azimuth angle.
 ;-
-FUNCTION MrDist4D::ESpec, $
+FUNCTION MrDist4D_v1::ESpec, $
 CACHE=cache, $
 PHI_RANGE=phi_range, $
 NAME=name, $
@@ -822,7 +629,7 @@ END
 ;       DIST3D:             out, required, type=MrVariable object
 ;                           A 3D distribution FUNCTION.
 ;-
-FUNCTION MrDist4D::GetDist3D, idx
+FUNCTION MrDist4D_v1::GetDist3D, idx
 	Compile_Opt idl2
 	On_Error, 2
 
@@ -954,7 +761,7 @@ END
 ;       _REF_EXTRA:         out, optional, type=any
 ;                           Any keyword accepted by MrTimeSeries::GetProperty
 ;-
-PRO MrDist4D::GetProperty, $
+PRO MrDist4D_v1::GetProperty, $
 ELEVATION=elevation, $
 MASS=mass, $
 SPECIES=species, $
@@ -986,7 +793,7 @@ END
 ;       OP:             out, required, type=MrTimeSeries
 ;                       Heat flux tensor as a function of time.
 ;-
-FUNCTION MrDist4D::HeatFlux, $
+FUNCTION MrDist4D_v1::HeatFlux, $
 CACHE=cache, $
 NAME=name
 	Compile_Opt idl2
@@ -1052,7 +859,7 @@ END
 ;       OP:             out, required, type=MrTimeSeries
 ;                       Pressure tensor as a function of time.
 ;-
-PRO MrDist4D::Moments, $
+PRO MrDist4D_v1::Moments, $
 CACHE=cache, $
 DENSITY=oN, $
 ENTROPY=oS, $
@@ -1296,7 +1103,7 @@ END
 ;       DIST2D:         out, required, type=MrTimeSeries object
 ;                       A time-varying 2D distribution in polar angle and energy.
 ;-
-FUNCTION MrDist4D::PhiE, $
+FUNCTION MrDist4D_v1::PhiE, $
 CACHE=cache, $
 NAME=name, $
 NE_BINS=ne_bins, $
@@ -1415,7 +1222,7 @@ END
 ;       OPHISPEC:       out, required, type=MrTimeSeries
 ;                       A 1D distribution in time, averaged over energy and polar angle.
 ;-
-FUNCTION MrDist4D::PhiSpec, $
+FUNCTION MrDist4D_v1::PhiSpec, $
 CACHE=cache, $
 E_RANGE=E_range, $
 NAME=name, $
@@ -1529,7 +1336,7 @@ END
 ;       DIST2D:         out, required, type=MrTimeSeries object
 ;                       A time-varying 2D distribution in polar angle and energy.
 ;-
-FUNCTION MrDist4D::PhiTheta, $
+FUNCTION MrDist4D_v1::PhiTheta, $
 CACHE=cache, $
 NAME=name, $
 E_RANGE=E_Range, $
@@ -1644,7 +1451,7 @@ END
 ;       OP:             out, required, type=MrTimeSeries
 ;                       Pressure tensor as a function of time.
 ;-
-FUNCTION MrDist4D::Pressure, $
+FUNCTION MrDist4D_v1::Pressure, $
 CACHE=cache, $
 NAME=name
 	Compile_Opt idl2
@@ -1653,234 +1460,32 @@ NAME=name
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
+		IF N_Elements(oDist3D) GT 0 THEN Obj_Destroy, oDist3D
+		IF N_Elements(oN)      GT 0 THEN Obj_Destroy, oN
 		RETURN, !Null
 	ENDIF
 	
 	;Defaults
 	tf_cache = Keyword_Set(cache)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Pressure'
-	
-	;Must integrate over phase space
-	IF self.units NE 'PSD' THEN Message, 'Units must be "PSD". They are "' + self.units + '".'
 
-	;Convert to radians
-	deg2rad = !dpi / 180D
-	q       = MrConstants('q')
-	eV2J    = MrConstants('eV2J')
-	dims    = Size(self.oDist, /DIMENSIONS)
-	
-;-----------------------------------------------------
-; Integrate over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;
-	; Let
-	;    VM = Vm^2 - sign(q) Vsc^2
-	;
-	; Where, here and in what follows,
-	;    VM      =  The velocity corrected for spacecraft potential effects
-	;    Vm      =  The measured velocity related to the energy bins of the instrument
-	;    Vsc     =  The velocity gained by passing through the spacecraft potential sheath
-	;    U       =  Plasma bulk velocity
-	;    dVm     =  Size of a measured velocity space bin (energy bin width converted to velocity)
-	;    dOmega  =  Sin(Theta) dTheta dPhi = Element of solid angle
-	;    t       =  Theta, the polar angle
-	;    p       =  Phi, the azimuthal angle
-	;    m       =  Particle mass
-	;    f       =  The distribution function
-	;    q       =  Charge of the particle
-	;
-	; It follows that
-	;
-	;    Pxx = m * \Integral{ f dVm dOmega Vm [ VM^(3/2) sin(t)^2 cos(p)^2      - 2 VM Ux sin(t) cos(p)                       + Sqrt(VM) Ux^2  ]
-	;    Pxy = m * \Integral{ f dVm dOmega Vm [ VM^(3/2) sin(t)^2 sin(p) cos(p) -   VM Uy sin(t) cos(p) - VM Ux sin(t) sin(p) + Sqrt(VM) Ux Uy ]
-	;    Pxz = m * \Integral{ f dVm dOmega Vm [ VM^(3/2) sin(t)   cos(t) cos(p) -   VM Uz sin(t) cos(p) - VM Ux cos(t)        + Sqrt(VM) Ux Uz ]
-	;    Pyy = m * \Integral{ f dVm dOmega Vm [ VM^(3/2) sin(t)^2 sin(p)^2      - 2 VM Uy sin(t) sin(p)                       + Sqrt(VM) Uy^2  ]
-	;    Pyz = m * \Integral{ f dVm dOmega Vm [ VM^(3/2) sin(t)   cos(t) sin(p) -   VM Uz sin(t) sin(p) - VM Uy cos(t)        + Sqrt(VM) Uy Uz ]
-	;    Pzz = m * \Integral{ f dVm dOmega Vm [ VM^(3/2) cos(t)^2               - 2 VM Uz cos(t)                              + Sqrt(VM) Uz^2  ]
-	;
-	
-	;We need the bulk velocity
-	;   - Convert km/s to m/s
-	oBulkV = 1e3 * Self -> Velocity()
-	vx     = Rebin(oBulkV['DATA',*,0], dims)
-	vy     = Rebin(oBulkV['DATA',*,1], dims)
-	vz     = Rebin(oBulkV['DATA',*,2], dims)
-	Obj_Destroy, oBulkV
-	
-	;Extract phi and the bin sizes
-	oPhi = self.oDist['DEPEND_1']
-	phi  = Rebin(oPhi['DATA'] * deg2rad, dims)
-	dPhi = Rebin((oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR'])['DATA'] * deg2rad, dims)
-	
-	;Pxx
-	fxx1_temp = Total( self.oDist['DATA'] * Cos(phi)^2 * dPhi,        2 )
-	fxx2_temp = Total( self.oDist['DATA'] * Cos(phi)   * dPhi * vx,   2 ) * 2.0
-	fxx3_temp = Total( self.oDist['DATA']              * dPhi * vx^2, 2 )
-	
-	;Pxy
-	fxy1_temp = Total( self.oDist['DATA'] * Sin(phi) * Cos(phi) * dPhi,           2 )
-	fxy2_temp = Total( self.oDist['DATA'] * Cos(phi)            * dPhi * vy,      2 )
-	fxy3_temp = Total( self.oDist['DATA'] * Sin(phi)            * dPhi * vx,      2 )
-	fxy4_temp = Total( self.oDist['DATA']                       * dPhi * vx * vy, 2 )
-	
-	;Pxz
-	fxz1_temp = Total( self.oDist['DATA'] * Cos(phi) * dPhi,           2 )
-	fxz2_temp = Total( self.oDist['DATA'] * Cos(phi) * dPhi * vz,      2 )
-	fxz3_temp = Total( self.oDist['DATA']            * dPhi * vx,      2 )
-	fxz4_temp = Total( self.oDist['DATA']            * dPhi * vx * vz, 2 )
-	
-	;Pyy
-	fyy1_temp = Total( self.oDist['DATA'] * Sin(phi)^2 * dPhi,        2 )
-	fyy2_temp = Total( self.oDist['DATA'] * Sin(phi)   * dPhi * vy,   2 ) * 2.0
-	fyy3_temp = Total( self.oDist['DATA']              * dPhi * vy^2, 2 )
-	
-	;Pyz
-	fyz1_temp = Total( self.oDist['DATA'] * Sin(phi) * dPhi,           2 )
-	fyz2_temp = Total( self.oDist['DATA'] * Sin(phi) * dPhi * vz,      2 )
-	fyz3_temp = Total( self.oDist['DATA']            * dPhi * vy,      2 )
-	fyz4_temp = Total( self.oDist['DATA']            * dPhi * vy * vz, 2 )
-	
-	;Pzz
-	fzz1_temp = Total( self.oDist['DATA'] * dPhi,        2 )
-	fzz2_temp = Total( self.oDist['DATA'] * dPhi * vz,   2 ) * 2.0
-	fzz3_temp = Total( self.oDist['DATA'] * dPhi * vz^2, 2 )
-	
-	phi  = !Null
-	dPhi = !Null
-	vx   = !Null
-	vy   = !Null
-	vz   = !Null
+	;Allocate memory
+	nTime = self.oDist -> GetNPts()
+	P     = FltArr( nTime, 3, 3 )
 
-;-----------------------------------------------------
-; Integrate over Theta \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract theta and the bin sizes
-	oTheta = self.oDist['DEPEND_2']
-	theta  = Rebin(oTheta['DATA'] * deg2rad, dims[[0,2,3]])
-	dTheta = Rebin((oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR'])['DATA'] * deg2rad, dims[[0,2,3]])
-	
-	;Pxx
-	fxx1_temp = Total( fxx1_temp * Sin(theta)^3 * dTheta, 2 )
-	fxx2_temp = Total( fxx2_temp * Sin(theta)^2 * dTheta, 2 )
-	fxx3_temp = Total( fxx3_temp * Sin(theta)   * dTheta, 2 )
-	
-	;Pxy
-	fxy1_temp = Total( fxy1_temp * Sin(theta)^3            * dTheta, 2 )
-	fxy2_temp = Total( fxy2_temp * Sin(theta)^2            * dTheta, 2 )
-	fxy3_temp = Total( fxy3_temp * Sin(theta) * Cos(theta) * dTheta, 2 )
-	fxy4_temp = Total( fxy4_temp * Sin(theta)              * dTheta, 2 )
-	
-	;Pxz
-	fxz1_temp = Total( fxz1_temp * Sin(theta)^2 * Cos(theta) * dTheta, 2 )
-	fxz2_temp = Total( fxz2_temp * Sin(theta)^2              * dTheta, 2 )
-	fxz3_temp = Total( fxz3_temp * Sin(theta)   * Cos(theta) * dTheta, 2 )
-	fxz4_temp = Total( fxz4_temp * Sin(theta)                * dTheta, 2 )
-	
-	;Pyy
-	fyy1_temp = Total( fyy1_temp * Sin(theta)^3 * dTheta, 2 )
-	fyy2_temp = Total( fyy2_temp * Sin(theta)^2 * dTheta, 2 )
-	fyy3_temp = Total( fyy3_temp * Sin(theta)   * dTheta, 2 )
-	
-	;Pyz
-	fyz1_temp = Total( fyz1_temp * Sin(theta)^2 * Cos(theta) * dTheta, 2 )
-	fyz2_temp = Total( fyz2_temp * Sin(theta)^2              * dTheta, 2 )
-	fyz3_temp = Total( fyz3_temp * Sin(theta)   * Cos(theta) * dTheta, 2 )
-	fyz4_temp = Total( fyz4_temp * Sin(theta)                * dTheta, 2 )
-	
-	;Pzz
-	fzz1_temp = Total( fzz1_temp * Sin(theta) * Cos(theta)^2 * dTheta, 2 )
-	fzz2_temp = Total( fzz2_temp * Sin(theta) * Cos(theta)   * dTheta, 2 )
-	fzz3_temp = Total( fzz3_temp * Sin(theta)                * dTheta, 2 )
+	;Step over each time
+	FOR i = 0, nTime - 1 DO BEGIN
+		oDist3D = self -> GetDist3D(i)
+		
+		;Reduce the distribution
+		P[i,*,*] = oDist3D -> Pressure()
 
-;-----------------------------------------------------
-; Integrate over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract phi and the bin sizes
-	oEnergy = self.oDist['DEPEND_3']
-	energy  = oEnergy['DATA']
-	dEnergy = (oEnergy['DELTA_PLUS_VAR'] +  oEnergy['DELTA_MINUS_VAR'])['DATA']
-	
-	;
-	; Convert energy to velocity
-	;   - E  = 1/2 * m * v^2
-	;   - dE = m * v * dv
-	;   - v  = Sqrt( 2 * E / m )
-	;   - dv = dE / (m v)
-	;
-	
-	;Convert energy from eV to J
-	v    = sqrt(2.0 * eV2J * Temporary(energy) / self.mass)
-	dv   = eV2J * Temporary(dEnergy) / (self.mass * v)
-	
-	;SPACECRAFT POTENTIAL
-	IF N_Elements(self.oVsc) GT 0 THEN BEGIN
-		;Sign is charge dependent. E = q * V = 1/2 * m * v^2
-		sgn  = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
-		vsc  = Sqrt( 2.0 * q / self.mass * self.oVsc['DATA'] )
-		VM    = v^2 * (1 + signQ * (vsc^2 / v^2))
-	ENDIF ELSE BEGIN
-		VM = v^2
-	ENDELSE
-	
-	
-	;
-	; VELOCITY
-	;
-
-	;V is in m/s while f is in s^3/cm^6
-	;   - f --> s^3/cm^6 --> s^3/m^6 * 1e12
-	
-	;Pxx
-	fxx1_temp = self.mass * Total( fxx1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fxx2_temp = self.mass * Total( fxx2_temp * v * VM           * dv, 2 ) * 1e12
-	fxx3_temp = self.mass * Total( fxx3_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pxx       = Temporary(fxx1_temp) - Temporary(fxx2_temp) + Temporary(fxx3_temp)
-	
-	;Pxy
-	fxy1_temp = self.mass * Total( fxy1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fxy2_temp = self.mass * Total( fxy2_temp * v * VM           * dv, 2 ) * 1e12
-	fxy3_temp = self.mass * Total( fxy3_temp * v * VM           * dv, 2 ) * 1e12
-	fxy4_temp = self.mass * Total( fxy4_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pxy       = Temporary(fxy1_temp) - Temporary(fxy2_temp) - Temporary(fxy3_temp) + Temporary(fxy4_temp)
-	
-	;Pxz
-	fxz1_temp = self.mass * Total( fxz1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fxz2_temp = self.mass * Total( fxz2_temp * v * VM           * dv, 2 ) * 1e12
-	fxz3_temp = self.mass * Total( fxz3_temp * v * VM           * dv, 2 ) * 1e12
-	fxz4_temp = self.mass * Total( fxz4_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pxz       = Temporary(fxz1_temp) - Temporary(fxz2_temp) - Temporary(fxz3_temp) + Temporary(fxz4_temp)
-	
-	;Pyy
-	fyy1_temp = self.mass * Total( fyy1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fyy2_temp = self.mass * Total( fyy2_temp * v * VM           * dv, 2 ) * 1e12
-	fyy3_temp = self.mass * Total( fyy3_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pyy       = Temporary(fyy1_temp) - Temporary(fyy2_temp) + Temporary(fyy3_temp)
-	
-	;Pyz
-	fyz1_temp = self.mass * Total( fyz1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fyz2_temp = self.mass * Total( fyz2_temp * v * VM           * dv, 2 ) * 1e12
-	fyz3_temp = self.mass * Total( fyz3_temp * v * VM           * dv, 2 ) * 1e12
-	fyz4_temp = self.mass * Total( fyz4_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pyz       = Temporary(fyz1_temp) - Temporary(fyz2_temp) - Temporary(fyz3_temp) + Temporary(fyz4_temp)
-	
-	;Pzz
-	fzz1_temp = self.mass * Total( fzz1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fzz2_temp = self.mass * Total( fzz2_temp * v * VM           * dv, 2 ) * 1e12
-	fzz3_temp = self.mass * Total( fzz3_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pzz       = Temporary(fzz1_temp) - Temporary(fzz2_temp) + Temporary(fzz3_temp)
-	
-	v  = !Null
-	dv = !Null
-	VM = !Null
-;-----------------------------------------------------
-; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
+		;Destroy the object
+		Obj_Destroy, oDist3D
+	ENDFOR
 	
 	;Energy-time spectrogram
-	;   - Convert Pa to nPa
-	oP = MrMatrixTS( self.oDist['TIMEVAR'], [ [[Pxx], [Pxy], [Pxz]], $
-	                                          [[Pxy], [Pyy], [Pyz]], $
-	                                          [[Pxz], [Pyz], [Pzz]] ] * 1e9, $
+	oP = MrMatrixTS( self.oDist['TIMEVAR'], P, $
 	                 CACHE = tf_cache, $
 	                 NAME  = name, $
 	                 /NO_COPY )
@@ -1931,7 +1536,7 @@ END
 ;                       The re-binned distribution function.
 ;
 ;-
-FUNCTION MrDist4D::RebinAngles, odV, $
+FUNCTION MrDist4D_v1::RebinAngles, odV, $
 CACHE=cache, $
 NAME=name, $
 NPHI_BINS=nPhi_Bins, $
@@ -2044,7 +1649,7 @@ END
 ;       _REF_EXTRA:         in, optional, type=any
 ;                           Any keyword accepted by MrTimeSeries::SetProperty
 ;-
-PRO MrDist4D::SetProperty, $
+PRO MrDist4D_v1::SetProperty, $
 ELEVATION=elevation, $
 MASS=mass, $
 SPECIES=species
@@ -2130,7 +1735,7 @@ END
 ;                           and will be left undefined (a MrTimeSeries object will not
 ;                           be destroyed, but its array will be empty).
 ;-
-PRO MrDist4D::SetData, time, data, phi, theta, energy, $
+PRO MrDist4D_v1::SetData, time, data, phi, theta, energy, $
 DEGREES=degrees, $
 DIMENSION=dimension, $
 NO_COPY=no_copy, $
@@ -2225,7 +1830,7 @@ END
 ;                           and will be left undefined (a MrTimeSeries object will not
 ;                           be destroyed, but its array will be empty).
 ;-
-PRO MrDist4D::SetVsc, Vsc, $
+PRO MrDist4D_v1::SetVsc, Vsc, $
 NO_COPY=no_copy
 	Compile_Opt idl2
 	On_Error, 2
@@ -2263,146 +1868,103 @@ END
 
 
 ;+
-;   Set the phi array.
+;   Set the energy array.
 ;
 ; :Params:
-;       PHI:            in, required, type=Nx1 or NxM array
-;                       Azimuthal coordinates of the distribution pixels. Can be the name
+;       ENERGY:         in, required, type=Nx1 or NxM array
+;                       Energy coordinates of the distribution pixels. Can be the name
 ;                           or reference of a MrVariable object, or the variable data.
 ;                           IF the variable is a MrTimeSeries object, its time property
 ;                           must be the same as that of the implicit distribution.
-;                           It must have dimensions of [phi, theta] or [time, phi, theta]
+;                           IF data has two dimensions, one must be time and the other
+;                           must be the same Size as the fourth dimension of the
+;                           distribution.
 ;
 ; :Keywords:
-;       DEGREES:        in, optional, type=boolean, default=1
-;                       IF set to zero, `THETA` has units of radians. Degrees are
-;                           assumed. Cannot be used with `RADIANS`.
 ;       NO_COPY:        in, optional, type=boolean, default=0
-;                       IF set `THETA` will be copied directly into the object
+;                       IF set `PHI` will be copied directly into the object
 ;                           and will be left undefined (a MrTimeSeries object will not
 ;                           be destroyed, but its array will be empty).
-;       RADIANS:        in, optional, type=boolean, default=1
-;                       IF set, `THETA` has units of radians. Otherwise, degrees are
-;                           assumed. Cannot be used with `DEGREES`.
 ;-
-PRO MrDist4D::SetEnergy, energy, $
+PRO MrDist4D_v1::SetEnergy, energy, $
 NO_COPY=no_copy
 	Compile_Opt idl2
 	On_Error, 2
 	
 	;Dimensions
-	oTime   = self.oDist['TIMEVAR']
 	theDims = Size(self.oDist, /DIMENSIONS)
 	nTimes  = theDims[0]
 	nEnergy = theDims[3]
-	
-	IF N_Elements(degrees) GT 0 && N_Elements(radians) GT 0 $
-		THEN Message, 'DEGREES and RADIANS are mutually exclusive.'
-	IF N_Elements(degrees) GT 0 THEN tf_degrees = Keyword_Set(degrees)
-	IF N_Elements(radians) GT 0 THEN tf_degrees = ~Keyword_Set(radians)
 	
 	;
 	; Steps:
 	;   1. Obtain variable object
 	;   2. Compare Size to distribution FUNCTION
-	;   3. Set DEPEND_2 attribute
+	;   3. Set DEPEND_3 attribute
 	;
-	
+
 ;-----------------------------------------------------
 ; Obtain Variable Object \\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	
-	;Use existing energy
+	;Use existing ENERGY
 	IF N_Elements(energy) EQ 0 THEN BEGIN
 		oEnergy = self.oDist['DEPEND_3']
 	
-	;Check given energy
+	;Check given ENERGY
 	ENDIF ELSE BEGIN
 		;DATA
 		IF MrIsA(energy, /NUMBER, /ARRAY) THEN BEGIN
-			dims  = Size(energy, /DIMENSIONS)
-			nDims = N_Elements(dims)
+			szTheta = Size(energy, /DIMENSIONS)
+			nDims   = N_Elements(szTheta)
 			
-			CASE nDims OF
-				1: oEnergy = MrTimeSeries( oTime, Rebin(Reform(energy, 1, nEnergy), nTimes, nEnergy), $
-				                        NAME = self.oDist.name + '_energy'  )
-				2: oEnergy = MrTimeSeries( oTime, energy, NAME=self.name + '_energy' )
-				ELSE: Message, 'energy must have 1 or 2 dimensions.'
-			ENDCASE
+			;Check dimensions
+			IF nDims EQ 1 THEN BEGIN
+				oEnergy = MrVariable( energy, NAME=self.name + '_energy'  )
+			
+			;Time-dependent
+			ENDIF ELSE IF nDims EQ 2 THEN BEGIN
+				;One must be TIME
+				IF szTheta[0] EQ nTime || szTheta[1] EQ nTimes $
+					THEN oEnergy = MrTimeSeries( self.oTime, energy, NAME=self.name + '_energy' ) $
+					ELSE Message, 'Invalid dimensions: ENERGY.'
+			
+			;Invalid
+			ENDIF ELSE BEGIN
+				Message, 'ENERGY must have 1 or 2 dimensions.'
+			ENDELSE
 		
 		;VARIABLE
 		ENDIF ELSE BEGIN
 			oEnergy = MrVar_Get(energy)
-			oEnergy = oEnergy -> Copy(self.oDist.name + '_energy')
-			IF ~Obj_IsA(oEnergy, 'MrTimeSeries') THEN BEGIN
-				oEnergy = MrTimeSeries( oTime, Rebin(Reform(oEnergy['DATA'], 1, nEnergy), nTimes, nEnergy), $
-				                        NAME = self.oDist.name + '_energy' )
-			ENDIF
 		ENDELSE
 	ENDELSE
-	
-;-----------------------------------------------------
-; Delta Plus \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	IF oEnergy -> HasAttr('DELTA_PLUS_VAR') THEN BEGIN
-		oEnergy_dPlus = oEnergy['DELTA_PLUS_VAR']
-		IF ~Obj_IsA(oEnergy_dPlus, 'MrTimeSeries') THEN BEGIN
-			oEnergy_dPlus = MrTimeSeries(oTime, Rebin(Reform(oEnergy_dPlus['DATA'], 1, nEnergy), nTimes, nEnergy), $
-			                          NAME = oEnergy.name + '_dPlus')
-		ENDIF
-	
-	ENDIF ELSE IF oEnergy -> HasAttr('DELTA_PLUS') THEN BEGIN
-		dPlus = oEnergy['DELTA_PLUS']
-		oEnergy_dPlus = MrTimeSeries(oTime, Rebin([dPlus], nTimes, nEnergy), $
-		                          NAME = oEnergy.name + '_dPlus')
-		oEnergy -> RemoveAttr, 'DELTA_PLUS'
-	
-	;Half of the mean spacing between elements
-	ENDIF ELSE BEGIN
-		dPlus = self -> DeltaE(oEnergy['DATA']) / 2.0
-		oEnergy_dPlus = MrTimeSeries(oTime, dPlus, $
-		                             NAME = oEnergy.name + '_dPlus')
-	ENDELSE
-	
-	;Add as attribute
-	oEnergy['DELTA_PLUS_VAR'] = oEnergy_dPlus
-	
-;-----------------------------------------------------
-; Delta Minus \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	IF oEnergy -> HasAttr('DELTA_MINUS_VAR') THEN BEGIN
-		oEnergy_dMinus = oEnergy['DELTA_MINUS_VAR']
-		IF ~Obj_IsA(oEnergy_dMinus, 'MrTimeSeries') THEN BEGIN
-			oEnergy_dMinus = MrTimeSeries(oTime, Rebin(Reform(oEnergy_dMinus['DATA'], 1, nEnergy), nTimes, nEnergy), $
-			                          NAME = oEnergy.name + '_dMinus')
-		ENDIF
-	
-	ENDIF ELSE IF oEnergy -> HasAttr('DELTA_PLUS') THEN BEGIN
-		dMinus = oEnergy['DELTA_PLUS']
-		oEnergy_dMinus = MrTimeSeries(oTime, Rebin([dMinus], nTimes, nEnergy), $
-		                          NAME = oEnergy.name + '_dMinus')
-		oEnergy -> RemoveAttr, 'DELTA_PLUS'
-	
-	;Half of the mean spacing between elements
-	ENDIF ELSE BEGIN
-		dMinus = self -> DeltaE(oEnergy['DATA']) / 2.0
-		oEnergy_dMinus = MrTimeSeries(oTime, dMinus, $
-		                              NAME = oEnergy.name + '_dMinus')
-	ENDELSE
-	
-	;Add as attribute
-	oEnergy['DELTA_MINUS_VAR'] = oEnergy_dMinus
 
 ;-----------------------------------------------------
 ; Compare With Distribution \\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	
-	;Make sure DIST and energy use the same time object
-	IF ~oEnergy -> IsTimeIdentical( self.oDist ) $
-		THEN Message, 'energy and DIST have different time objects.'
+	;Time objects
+	IF Obj_IsA(oEnergy, 'MrTimeSeries') THEN BEGIN
+		;Make sure DIST and ENERGY use the same time object
+		IF ~oEnergy -> IsTimeIdentical( self.oDist ) $
+			THEN Message, 'ENERGY and DIST have different time objects.'
+	ENDIF
 	
+	;Data Size
+	dims  = Size(oEnergy, /DIMENSIONS)
+	nDims = N_Elements(dims)
+	IF nDims EQ 1 THEN BEGIN
+		IF dims[0] NE nEnergy THEN Message, 'Invalid dimensions: ENERGY.'
+	ENDIF ELSE IF nDims EQ 2 THEN BEGIN
+		IF dims[0] NE nTimes THEN Message, 'Invalid dimensions: ENERGY.'
+		IF dims[1] NE nEnergy THEN Message, 'Invalid dimensions: ENERGY.'
+	ENDIF ELSE BEGIN
+		Message, 'ENERGY must have 1 or 2 dimensions.'
+	ENDELSE
+
 ;-----------------------------------------------------
-; SetProperties \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+; Set Attribute \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	self.oDist['DEPEND_3'] = oEnergy
 END
@@ -2431,7 +1993,7 @@ END
 ;                       IF set, `THETA` has units of radians. Otherwise, degrees are
 ;                           assumed. Cannot be used with `DEGREES`.
 ;-
-PRO MrDist4D::SetPhi, phi, $
+PRO MrDist4D_v1::SetPhi, phi, $
 DEGREES=degrees, $
 NO_COPY=no_copy, $
 RADIANS=radians
@@ -2439,13 +2001,15 @@ RADIANS=radians
 	On_Error, 2
 	
 	;Dimensions
-	oTime   = self.oDist['TIMEVAR']
 	theDims = Size(self.oDist, /DIMENSIONS)
 	nTimes  = theDims[0]
 	nPhi    = theDims[1]
+	nTheta  = theDims[2]
 	
 	IF N_Elements(degrees) GT 0 && N_Elements(radians) GT 0 $
 		THEN Message, 'DEGREES and RADIANS are mutually exclusive.'
+	IF N_Elements(degrees) GT 0 THEN tf_degrees = Keyword_Set(degrees)
+	IF N_Elements(radians) GT 0 THEN tf_degrees = ~Keyword_Set(radians)
 	
 	;
 	; Steps:
@@ -2469,95 +2033,59 @@ RADIANS=radians
 			dims  = Size(phi, /DIMENSIONS)
 			nDims = N_Elements(dims)
 			
-			CASE nDims OF
-				1: oPhi = MrTimeSeries( oTime, Rebin(Reform(phi, 1, nPhi), nTimes, nPhi), $
-				                        NAME = self.oDist.name + '_phi'  )
-				2: oPhi = MrTimeSeries( oTime, phi, NAME=self.name + '_phi' )
-				ELSE: Message, 'PHI must have 1 or 2 dimensions.'
-			ENDCASE
+			;Check dimensions
+			IF nDims EQ 1 THEN BEGIN
+				oPhi = MrVariable( phi, NAME=self.name + '_phi'  )
+			
+			;Time-dependent
+			ENDIF ELSE IF nDims EQ 2 THEN BEGIN
+				;One must be TIME
+				IF dims[0] EQ nTimes && dims[1] EQ nPhi $
+					THEN oPhi = MrTimeSeries( self.oTime, phi, NAME=self.name + '_phi' ) $
+					ELSE Message, 'Invalid dimensions: PHI.'
+			
+			;Invalid
+			ENDIF ELSE BEGIN
+				Message, 'PHI must have 1 or 2 dimensions.'
+			ENDELSE
 		
 		;VARIABLE
 		ENDIF ELSE BEGIN
-			oTemp = MrVar_Get(phi)
-			oPhi  = oTemp -> Copy(self.oDist.name + '_phi')
-			IF ~Obj_IsA(oPhi, 'MrTimeSeries') THEN BEGIN
-				oPhi = MrTimeSeries( oTime, Rebin(Reform(oPhi['DATA'], 1, nPhi), nTimes, nPhi), $
-				                     NAME = self.oDist.name + '_phi' )
-				oTemp -> CopyAttrTo, oPhi
-			ENDIF
+			oPhi = MrVar_Get(phi)
 		ENDELSE
 	ENDELSE
-	
-;-----------------------------------------------------
-; Delta Plus \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	IF oPhi -> HasAttr('DELTA_PLUS_VAR') THEN BEGIN
-		oPhi_dPlus = oPhi['DELTA_PLUS_VAR']
-		IF ~Obj_IsA(oPhi_dPlus, 'MrTimeSeries') THEN BEGIN
-			oPhi_dPlus = MrTimeSeries(oTime, Rebin(Reform(oPhi_dPlus['DATA'], 1, nPhi), nTimes, nPhi), $
-			                          NAME = oPhi.name + '_dPlus')
-		ENDIF
-	
-	ENDIF ELSE IF oPhi -> HasAttr('DELTA_PLUS') THEN BEGIN
-		dPlus = oPhi['DELTA_PLUS']
-		oPhi_dPlus = MrTimeSeries(oTime, Rebin([dPlus], nTimes, nPhi), $
-		                          NAME = oPhi.name + '_dPlus')
-		oPhi -> RemoveAttr, 'DELTA_PLUS'
-	
-	;Half of the mean spacing between elements
-	ENDIF ELSE BEGIN
-		dPlus = Mean(oPhi['DATA',*,1:*] - oPhi['DATA'])
-		oPhi_dPlus = MrTimeSeries(oTime, Rebin([dPlus], nTimes, nPhi), $
-		                          NAME = oPhi.name + '_dPlus')
-	ENDELSE
-	
-	;Add as attribute
-	oPhi['DELTA_PLUS_VAR'] = oPhi_dPlus
-	
-;-----------------------------------------------------
-; Delta Minus \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	IF oPhi -> HasAttr('DELTA_MINUS_VAR') THEN BEGIN
-		oPhi_dMinus = oPhi['DELTA_MINUS_VAR']
-		IF ~Obj_IsA(oPhi_dMinus, 'MrTimeSeries') THEN BEGIN
-			oPhi_dMinus = MrTimeSeries(oTime, Rebin(Reform(oPhi_dMinus['DATA'], 1, nPhi), nTimes, nPhi), $
-			                          NAME = oPhi.name + '_dMinus')
-		ENDIF
-	
-	ENDIF ELSE IF oPhi -> HasAttr('DELTA_PLUS') THEN BEGIN
-		dMinus = oPhi['DELTA_PLUS']
-		oPhi_dMinus = MrTimeSeries(oTime, Rebin([dMinus], nTimes, nPhi), $
-		                          NAME = oPhi.name + '_dMinus')
-		oPhi -> RemoveAttr, 'DELTA_PLUS'
-	
-	;Half of the mean spacing between elements
-	ENDIF ELSE BEGIN
-		dMinus = 0
-		oPhi_dMinus = MrTimeSeries(oTime, Rebin([dMinus], nTimes, nPhi), $
-		                           NAME = oPhi.name + '_dMinus')
-	ENDELSE
-	
-	;Add as attribute
-	oPhi['DELTA_MINUS_VAR'] = oPhi_dMinus
 
 ;-----------------------------------------------------
 ; Compare With Distribution \\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	
-	;Make sure DIST and PHI use the same time object
-	IF ~oPhi -> IsTimeIdentical( self.oDist ) $
-		THEN Message, 'PHI and DIST have different time objects.'
+	;Time objects
+	IF Obj_IsA(oPhi, 'MrTimeSeries') THEN BEGIN
+		;Make sure DIST and PHI use the same time object
+		IF ~oPhi -> IsTimeIdentical( self.oDist ) $
+			THEN Message, 'PHI and DIST have different time objects.'
+	ENDIF
+	
+	;Data Size
+	dims  = Size(oPhi, /DIMENSIONS)
+	nDims = N_Elements(dims)
+	IF nDims EQ 1 THEN BEGIN
+		IF dims[0] NE nPhi THEN Message, 'Invalid dimensions: PHI.'
+	ENDIF ELSE IF nDims EQ 2 THEN BEGIN
+		IF dims[0] NE nTimes THEN Message, 'Invalid dimensions: PHI.'
+		IF dims[1] NE nPhi   THEN Message, 'Invalid dimensions: PHI.'
+	ENDIF ELSE IF nDims EQ 3 THEN BEGIN
+		IF dims[0] NE nTimes THEN Message, 'Invalid dimensions: PHI.'
+		IF dims[1] NE nPhi   THEN Message, 'Invalid dimensions: PHI.'
+		IF dims[2] NE nTheta THEN Message, 'Invalid dimensions: PHI.'
+	ENDIF ELSE BEGIN
+		Message, 'PHI must have 1, 2, or 3 dimensions.'
+	ENDELSE
 
 ;-----------------------------------------------------
 ; Units \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
-	IF N_Elements(degrees) GT 0 && N_Elements(radians) GT 0 THEN BEGIN
-		Message, 'DEGREES and RADIANS are mutually exclusive.'
-	ENDIF ELSE IF N_Elements(degrees) GT 0 THEN BEGIN
-		tf_degrees = Keyword_Set(degrees)
-	ENDIF ELSE IF N_Elements(radians) GT 0 THEN BEGIN
-		tf_degrees = ~Keyword_Set(radians)
-	ENDIF ELSE BEGIN
+	IF N_Elements(tf_degrees) EQ 0 THEN BEGIN
 		IF oPhi -> HasAttr('UNITS') THEN BEGIN
 			units = oPhi['UNITS']
 			CASE 1 of
@@ -2571,13 +2099,11 @@ RADIANS=radians
 		ENDIF ELSE BEGIN
 			tf_degrees = N_Elements(radians) EQ 0 ? Keyword_Set(degrees) : ~Keyword_Set(radians)
 		ENDELSE
-	ENDELSE
+	ENDIF
 
 	;Convert to degrees
 	IF ~tf_degrees THEN BEGIN
 		oPhi -> SetData, oPhi['DATA']*!radeg
-		oPhi['DELTA_MINUS_VAR'] *= !radeg
-		oPhi['DELTA_PLUS_VAR'] *= !radeg
 		oPhi['UNITS'] = 'degrees'
 	ENDIF
 
@@ -2589,12 +2115,12 @@ END
 
 
 ;+
-;   Set the phi array.
+;   Set the theta array.
 ;
 ; :Params:
-;       PHI:            in, required, type=Nx1 or NxM array
-;                       Azimuthal coordinates of the distribution pixels. Can be the name
-;                           or reference of a MrVariable object, or the variable data.
+;       THETA:          in, required, type=Nx1 or NxM array
+;                       Polar coordinates of the distribution pixels. Can be the name or
+;                           reference of a MrVariable object, or the variable data.
 ;                           IF the variable is a MrTimeSeries object, its time property
 ;                           must be the same as that of the implicit distribution.
 ;                           It must have dimensions of [phi, theta] or [time, phi, theta]
@@ -2611,7 +2137,7 @@ END
 ;                       IF set, `THETA` has units of radians. Otherwise, degrees are
 ;                           assumed. Cannot be used with `DEGREES`.
 ;-
-PRO MrDist4D::SetTheta, theta, $
+PRO MrDist4D_v1::SetTheta, theta, $
 DEGREES=degrees, $
 NO_COPY=no_copy, $
 RADIANS=radians
@@ -2619,122 +2145,90 @@ RADIANS=radians
 	On_Error, 2
 	
 	;Dimensions
-	oTime   = self.oDist['TIMEVAR']
 	theDims = Size(self.oDist, /DIMENSIONS)
 	nTimes  = theDims[0]
+	nPhi    = theDims[1]
 	nTheta  = theDims[2]
+	
+	IF N_Elements(degrees) GT 0 && N_Elements(radians) GT 0 $
+		THEN Message, 'DEGREES and RADIANS are mutually exclusive.'
 	
 	;
 	; Steps:
 	;   1. Obtain variable object
 	;   2. Compare Size to distribution FUNCTION
-	;   3. Set DEPEND_2 attribute
+	;   3. Units
+	;   4. Set DEPEND_2 attribute
 	;
-	
+
 ;-----------------------------------------------------
 ; Obtain Variable Object \\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
-	
-	;Use existing theta
+
+	;Use existing THETA
 	IF N_Elements(theta) EQ 0 THEN BEGIN
 		oTheta = self.oDist['DEPEND_2']
 	
-	;Check given theta
+	;Check given THETA
 	ENDIF ELSE BEGIN
 		;DATA
 		IF MrIsA(theta, /NUMBER, /ARRAY) THEN BEGIN
 			dims  = Size(theta, /DIMENSIONS)
 			nDims = N_Elements(dims)
 			
-			CASE nDims OF
-				1: oTheta = MrTimeSeries( oTime, Rebin(Reform(theta, 1, nTheta), nTimes, nTheta), $
-				                          NAME = self.oDist.name + '_theta'  )
-				2: oTheta = MrTimeSeries( oTime, theta, NAME=self.name + '_theta' )
-				ELSE: Message, 'theta must have 1 or 2 dimensions.'
-			ENDCASE
+			;Check dimensions
+			IF nDims EQ 1 THEN BEGIN
+				oTheta = MrVariable( theta, NAME=self.name + '_theta'  )
+			
+			;Time-dependent
+			ENDIF ELSE IF nDims EQ 2 THEN BEGIN
+				;One must be TIME
+				IF dims[0] EQ nTimes && dims[1] EQ nTheta $
+					THEN oTheta = MrTimeSeries( self.oTime, theta, NAME=self.name + '_theta' ) $
+					ELSE Message, 'Invalid dimensions: THETA.'
+			
+			;Invalid
+			ENDIF ELSE BEGIN
+				Message, 'THETA must have 1 or 2 dimensions.'
+			ENDELSE
 		
 		;VARIABLE
 		ENDIF ELSE BEGIN
-			oTemp = MrVar_Get(theta)
-			oTheta = oTemp -> Copy(self.oDist.name + '_theta')
-			IF ~Obj_IsA(oTheta, 'MrTimeSeries') THEN BEGIN
-				oTheta = MrTimeSeries( oTime, Rebin(Reform(oTheta['DATA'], 1, nTheta), nTimes, nTheta), $
-				                       NAME = self.oDist.name + '_theta' )
-				oTemp -> CopyAttrTo, oTheta
-			ENDIF
+			oTheta = MrVar_Get(theta)
 		ENDELSE
 	ENDELSE
-	
-;-----------------------------------------------------
-; Delta Plus \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	IF oTheta -> HasAttr('DELTA_PLUS_VAR') THEN BEGIN
-		oTheta_dPlus = oTheta['DELTA_PLUS_VAR']
-		IF ~Obj_IsA(oTheta_dPlus, 'MrTimeSeries') THEN BEGIN
-			oTheta_dPlus = MrTimeSeries(oTime, Rebin(Reform(oTheta_dPlus['DATA'], 1, nTheta), nTimes, nTheta), $
-			                            NAME = oTheta.name + '_dPlus')
-		ENDIF
-	
-	ENDIF ELSE IF oTheta -> HasAttr('DELTA_PLUS') THEN BEGIN
-		dPlus = oTheta['DELTA_PLUS']
-		oTheta_dPlus = MrTimeSeries(oTime, Rebin([dPlus], nTimes, nTheta), $
-		                            NAME = oTheta.name + '_dPlus')
-		oTheta -> RemoveAttr, 'DELTA_PLUS'
-	
-	;Half of the mean spacing between elements
-	ENDIF ELSE BEGIN
-		dPlus = Mean(oTheta['DATA',*,1:*] - oTheta['DATA'])
-		oTheta_dPlus = MrTimeSeries(oTime, Rebin([dPlus], nTimes, nTheta), $
-		                            NAME = oTheta.name + '_dPlus')
-	ENDELSE
-	
-	;Add as attribute
-	oTheta['DELTA_PLUS_VAR'] = oTheta_dPlus
-	
-;-----------------------------------------------------
-; Delta Minus \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	IF oTheta -> HasAttr('DELTA_MINUS_VAR') THEN BEGIN
-		oTheta_dMinus = oTheta['DELTA_MINUS_VAR']
-		IF ~Obj_IsA(oTheta_dMinus, 'MrTimeSeries') THEN BEGIN
-			oTheta_dMinus = MrTimeSeries(oTime, Rebin(Reform(oTheta_dMinus['DATA'], 1, nTheta), nTimes, nTheta), $
-			                             NAME = oTheta.name + '_dMinus')
-		ENDIF
-	
-	ENDIF ELSE IF oTheta -> HasAttr('DELTA_PLUS') THEN BEGIN
-		dMinus = oTheta['DELTA_PLUS']
-		oTheta_dMinus = MrTimeSeries(oTime, Rebin([dMinus], nTimes, nTheta), $
-		                             NAME = oTheta.name + '_dMinus')
-		oTheta -> RemoveAttr, 'DELTA_PLUS'
-	
-	;Half of the mean spacing between elements
-	ENDIF ELSE BEGIN
-		dMinus = 0
-		oTheta_dMinus = MrTimeSeries(oTime, Rebin([dMinus], nTimes, nTheta), $
-		                             NAME = oTheta.name + '_dMinus')
-	ENDELSE
-	
-	;Add as attribute
-	oTheta['DELTA_MINUS_VAR'] = oTheta_dMinus
 
 ;-----------------------------------------------------
 ; Compare With Distribution \\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	
-	;Make sure DIST and theta use the same time object
-	IF ~oTheta -> IsTimeIdentical( self.oDist ) $
-		THEN Message, 'theta and DIST have different time objects.'
+	;Time objects
+	IF Obj_IsA(oTheta, 'MrTimeSeries') THEN BEGIN
+		;Make sure DIST and THETA use the same time object
+		IF ~oTheta -> IsTimeIdentical(self.oDist) $
+			THEN Message, 'THETA and DIST have different time objects.'
+	ENDIF
+	
+	;Data Size
+	dims  = Size(oTheta, /DIMENSIONS)
+	nDims = N_Elements(dims)
+	IF nDims EQ 1 THEN BEGIN
+		IF dims[0] NE nTheta THEN Message, 'Invalid dimensions: THETA.'
+	ENDIF ELSE IF nDims EQ 2 THEN BEGIN
+		IF dims[0] NE nTimes THEN Message, 'Invalid dimensions: THETA.'
+		IF dims[1] NE nTheta THEN Message, 'Invalid dimensions: THETA.'
+	ENDIF ELSE IF nDims EQ 3 THEN BEGIN
+		IF dims[0] NE nTimes THEN Message, 'Invalid dimensions: THETA.'
+		IF dims[1] NE nPhi   THEN Message, 'Invalid dimensions: THETA.'
+		IF dims[2] NE nTheta THEN Message, 'Invalid dimensions: THETA.'
+	ENDIF ELSE BEGIN
+		Message, 'THETA must have 1, 2, or 3 dimensions.'
+	ENDELSE
 
 ;-----------------------------------------------------
 ; Units \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
-	IF N_Elements(degrees) GT 0 && N_Elements(radians) GT 0 THEN BEGIN
-		Message, 'DEGREES and RADIANS are mutually exclusive.'
-	ENDIF ELSE IF N_Elements(degrees) GT 0 THEN BEGIN
-		tf_degrees = Keyword_Set(degrees)
-	ENDIF ELSE IF N_Elements(radians) GT 0 THEN BEGIN
-		tf_degrees = ~Keyword_Set(radians)
-	ENDIF ELSE BEGIN
+	IF N_Elements(tf_degrees) EQ 0 THEN BEGIN
 		IF oTheta -> HasAttr('UNITS') THEN BEGIN
 			units = oTheta['UNITS']
 			CASE 1 of
@@ -2748,13 +2242,11 @@ RADIANS=radians
 		ENDIF ELSE BEGIN
 			tf_degrees = N_Elements(radians) EQ 0 ? Keyword_Set(degrees) : ~Keyword_Set(radians)
 		ENDELSE
-	ENDELSE
+	ENDIF
 	
 	;Convert to degrees
 	IF ~tf_degrees THEN BEGIN
 		oTheta -> SetData, oTheta['DATA']*!radeg
-		oTheta['DELTA_MINUS_VAR'] *= !radeg
-		oTheta['DELTA_PLUS_VAR'] *= !radeg
 		oTheta['UNITS'] = 'degrees'
 	ENDIF
 
@@ -2787,7 +2279,7 @@ END
 ;       DIST2D:         out, required, type=MrTimeSeries object
 ;                       A time-varying 2D distribution in polar angle and energy.
 ;-
-FUNCTION MrDist4D::ThetaE, $
+FUNCTION MrDist4D_v1::ThetaE, $
 CACHE=cache, $
 NAME=name, $
 NE_BINS=ne_bins, $
@@ -2906,7 +2398,7 @@ END
 ;       OTHETASPEC:     out, required, type=MrTimeSeries
 ;                       A 1D distribution in time, averaged over energy and azimuth.
 ;-
-FUNCTION MrDist4D::ThetaSpec, $
+FUNCTION MrDist4D_v1::ThetaSpec, $
 CACHE=cache, $
 E_RANGE=e_range, $
 NAME=name, $
@@ -2998,7 +2490,7 @@ END
 ;       OP:             out, required, type=MrTimeSeries
 ;                       Pressure tensor as a function of time.
 ;-
-FUNCTION MrDist4D::Temperature, $
+FUNCTION MrDist4D_v1::Temperature, $
 CACHE=cache, $
 NAME=name
 	Compile_Opt idl2
@@ -3007,6 +2499,8 @@ NAME=name
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
+		IF N_Elements(oDist3D) GT 0 THEN Obj_Destroy, oDist3D
+		IF N_Elements(oN)      GT 0 THEN Obj_Destroy, oN
 		RETURN, !Null
 	ENDIF
 	
@@ -3014,25 +2508,26 @@ NAME=name
 	tf_cache = Keyword_Set(cache)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Temperature'
 
-	;Conversion from Kelvin to eV
-	eV2K = 11600.0
+	;Allocate memory
+	nTime = self.oDist -> GetNPts()
+	T     = FltArr( nTime, 3, 3 )
+
+	;Step over each time
+	FOR i = 0, nTime - 1 DO BEGIN
+		oDist3D = self -> GetDist3D(i)
+		
+		;Reduce the distribution
+		T[i,*,*] = oDist3D -> Temperature()
+
+		;Destroy the object
+		Obj_Destroy, oDist3D
+	ENDFOR
 	
-	;Compute the pressure
-	oN = self -> Density()
-	oP = self -> Pressure()
-	
-	;Apply the equation of state
-	;   - PV = NkT
-	;   - T = kP/n
-	;   - N = 1/cm^3
-	;   - P = nPa
-	;   - 1e-15 converts to Kelvin
-	oT = oP / ( 1e15 * MrConstants('k_B') * oN )
-	oT /= eV2K
-	Obj_Destroy, [oN, oP]
-	
-	oT -> SetName, name
-	IF tf_cache THEN oT -> Cache
+	;Temperature tensor
+	oT = MrMatrixTS( self.oDist['TIMEVAR'], T, $
+	                 CACHE = tf_cache, $
+	                 NAME  = name, $
+	                 /NO_COPY )
 	
 	;Attributes
 	oT['CATDESC']       = 'Temperature computed from the 3D velocity space integral ' + $
@@ -3062,7 +2557,7 @@ END
 ;       ON:             out, required, type=MrScalarTS
 ;                       Density as a function of time.
 ;-
-FUNCTION MrDist4D::Velocity, $
+FUNCTION MrDist4D_v1::Velocity, $
 CACHE=cache, $
 NAME=name
 	Compile_Opt idl2
@@ -3071,114 +2566,38 @@ NAME=name
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
+		IF N_Elements(oDist3D) GT 0 THEN Obj_Destroy, oDist3D
+		IF N_Elements(oV)      GT 0 THEN Obj_Destroy, oV
 		RETURN, !Null
 	ENDIF
 	
 	;Defaults
 	tf_cache = Keyword_Set(cache)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Velocity'
-	
-	;Must integrate over phase space
-	IF self.units NE 'PSD' THEN Message, 'Units must be "PSD". They are "' + self.units + '".'
 
-	;Convert to radians
-	deg2rad = !dpi / 180D
-	q       = MrConstants('q')
-	eV2J    = MrConstants('eV2J')
-	dims    = Size(self.oDist, /DIMENSIONS)
-	
-;-----------------------------------------------------
-; Integrate over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract phi and the bin sizes
-	oPhi = self.oDist['DEPEND_1']
-	phi  = oPhi['DATA'] * deg2rad
-	dPhi = (oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR'])['DATA'] * deg2rad
-	
-	;Integrate phi
-	;   - Integral( V * fdist * d^3V )
-	;   - V    = (Vx, Vy, Vz)
-	;   - Vx   = V * Sin(Theta) * Cos(Phi)
-	;   - Vy   = V * Sin(Theta) * Sin(Phi)
-	;   - Vz   = V * Cos(Theta)
-	;   - (d^3)V = V^2 * Sin(Theta) * dV * dTheta * dPhi
-	fx_temp = Total(self.oDist['DATA'] * Rebin(Cos(phi) * dPhi, dims), 2)
-	fy_temp = Total(self.oDist['DATA'] * Rebin(Sin(phi) * dPhi, dims), 2)
-	fz_temp = Total(self.oDist['DATA'] * Rebin(dPhi, dims), 2)
-	
-	phi  = !Null
-	dPhi = !Null
-;-----------------------------------------------------
-; Integrate over Theta \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract theta and the bin sizes
-	oTheta = self.oDist['DEPEND_2']
-	theta  = oTheta['DATA'] * deg2rad
-	dTheta = (oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR'])['DATA'] * deg2rad
-	
-	;Integrate
-	fx_temp = Total( Temporary(fx_temp) * Rebin(Sin(theta)^2 * dTheta, dims[[0,2,3]]), 2)
-	fy_temp = Total( Temporary(fy_temp) * Rebin(Sin(theta)^2 * dTheta, dims[[0,2,3]]), 2)
-	fz_temp = Total( Temporary(fz_temp) * Rebin(Sin(theta)*Cos(theta) * dTheta, dims[[0,2,3]]), 2)
-	
-	theta  = !Null
-	dTheta = !Null
-;-----------------------------------------------------
-; Integrate over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	;Extract phi and the bin sizes
-	oEnergy = self.oDist['DEPEND_3']
-	energy  = oEnergy['DATA']
-	dEnergy = (oEnergy['DELTA_PLUS_VAR'] + oEnergy['DELTA_MINUS_VAR'])['DATA']
-	
-	;
-	; Convert energy to velocity
-	;   - E  = 1/2 * m * v^2
-	;   - dE = m * v * dv
-	;   - v  = Sqrt( 2 * E / m )
-	;   - dv = dE / (m v)
-	;
-	
-	;Convert energy from eV to J
-	v    = sqrt(2.0 * eV2J * Temporary(energy) / self.mass)
-	dv   = eV2J * Temporary(dEnergy) / (self.mass * v)
-	
-	;Spacecraft potential correction
-	IF N_Elements(self.oVsc) GT 0 THEN BEGIN
-		;Sign is charge dependent. E = q * V = 1/2 * m * v^2
-		sgn  = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
-		vsc  = Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass )
+	;Allocate memory
+	nTime = self.oDist -> GetNPts()
+	V     = FltArr( nTime, 3 )
+
+	;Step over each time
+	FOR i = 0, nTime - 1 DO BEGIN
+		oDist3D = self -> GetDist3D(i)
 		
-		Vx = Total( Temporary(fx_temp) * v * (v^2 + sgn*vsc^2) * dv, 2 ) * 1e12
-		Vy = Total( Temporary(fy_temp) * v * (v^2 + sgn*vsc^2) * dv, 2 ) * 1e12
-		Vz = Total( Temporary(fz_temp) * v * (v^2 + sgn*vsc^2) * dv, 2 ) * 1e12
+		;Reduce the distribution
+		V[i,*] = oDist3D -> Velocity()
+
+		;Destroy the object
+		Obj_Destroy, oDist3D
+	ENDFOR
 	
-	ENDIF ELSE BEGIN
-		;V is in m/s while f is in s^3/cm^6
-		;   - f --> s^3/cm^6 --> s^3/m^6 * 1e12
-		Vx = Total( Temporary(fx_temp) * v^3 * dv, 2 ) * 1e12
-		Vy = Total( Temporary(fy_temp) * v^3 * dv, 2 ) * 1e12
-		Vz = Total( Temporary(fz_temp) * v^3 * dv, 2 ) * 1e12
-	ENDELSE
-	
-	v  = !Null
-	dv = !Null
-;-----------------------------------------------------
-; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
-;-----------------------------------------------------
-	
-	;Velocity
-	;   - Convert density 1/cm^3 -> 1/m^3
-	;   - Convert velocity m/s -> km/s
-	;   - Must negate to convert look angles to angles of incidence
-	oN = 1e6 * self -> Density()
-	oV = MrVectorTS( self.oDist['TIMEVAR'], -[[Temporary(Vx)], [Temporary(Vy)], [Temporary(Vz)]] )
-	oV = 1e-3 * oV / oN
+	;Energy-time spectrogram
+	oV = MrVectorTS( self.oDist['TIMEVAR'], V, $
+	                 CACHE = tf_cache, $
+	                 NAME  = name, $
+	                 /NO_COPY )
 	
 	;Attributes
-	IF tf_cache THEN oV -> Cache
-	oV -> SetName, name
-	oV['CATDESC']       = 'Bulk velocity computed from the 3D velocity space integral ' + $
+	oV['CATDESC']       = 'Number density computed from the 3D velocity space integral ' + $
 	                      'of the distribution function.'
 	oV['LABEL']         = ['Vx', 'Vy', 'Vz']
 	oV['UNITS']         = 'km/s'
@@ -3204,7 +2623,7 @@ END
 ;       DV:             out, required, type=MrScalarTS
 ;                       Size of each velocity-space volume element.
 ;-
-FUNCTION MrDist4D::VolumeElement, $
+FUNCTION MrDist4D_v1::VolumeElement, $
 CACHE=cache, $
 NAME=name
 	Compile_Opt idl2
@@ -3264,10 +2683,10 @@ END
 ; :Params:
 ;       CLASS:          out, optional, type=structure
 ;-
-PRO MrDist4D__DEFINE
+PRO MrDist4D_v1__DEFINE
 	Compile_Opt idl2
 	
-	class = { MrDist4D, $
+	class = { MrDist4D_v1, $
 	          elevation: 0B, $
 	          mass:      0.0, $
 	          oVsc:      Obj_New(), $

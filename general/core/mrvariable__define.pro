@@ -3998,6 +3998,223 @@ end
 
 
 ;+
+;   Prepare the variable data to be written to an ASCII file. The output structure
+;   can be passed to MrVar_ReadASCII via the _STRICT_EXTRA keyword.
+;
+; :Params:
+;       THECDF:         in, optional, type=long/string/objref
+;                       The name or CDF ID of the CDF file to which data is written,
+;                           or the MrCDF_File object containing the file information.
+;
+; :Keywords:
+;       CREATE:         in, optional, type=boolean
+;                       If set and the variable does not exist in the file, it is created.
+;                           The default is to check the file for a variable with the same
+;                           name and set the keyword accordingly. If set a variable by the
+;                           same name already exists in `THECDF`, an error will occur.
+;       CDF_TYPE:       in, optional, type=string
+;                       The CDF datatype of the variable. The default determined automatically
+;                           from the IDL datatype.
+;       TEST:           in, optional, type=boolean, default=0
+;                       If set, check if the variable already exists in the file. If it
+;                           does, return without doing anything. If not, set `CREATE`=1.
+;                           This is useful for, e.g., variables pointed to be the DEPEND_#
+;                           variables attribute, which can be shared among several other
+;                           variables. Prevents writing multiple times.
+;       _REF_EXTRA:     in, optional, type=any
+;                       Any keyword accepted by MrCDF_File::WriteVar is also accepted here.
+;
+; :Output:
+;       ASCII:          out, required, type=struct
+;                       A structure of keyword-value pairs that can be passed directly
+;                           to MrVar_ReadASCII.
+;-
+PRO MrVariable::ExportToASCII, file, $
+HEADER=header, $
+FORMAT=fmt, $
+CLOBBER=clobber, $
+_REF_EXTRA=extra
+	Compile_Opt idl2
+	
+	Catch, the_error
+	IF the_error NE 0 THEN BEGIN
+		Catch, /CANCEL
+		MrPrintF, 'LogErr'
+		IF Size(file, /TNAME) EQ 'STRING' && (file_info(file)).exists $
+			THEN IF N_Elements(lun) GT 0 THEN Close, lun
+		RETURN
+	END
+	
+	tf_open    = 0
+	tf_clobber = Keyword_Set(clobber)
+	tf_write   = N_Elements(file) GT 0
+
+;-------------------------------------------
+; Open the File ////////////////////////////
+;-------------------------------------------
+	
+	;Open the file
+	IF tf_write THEN BEGIN
+		;File name was given
+		IF MrIsA(file, 'STRING') THEN BEGIN
+			;Do not clobber
+			IF ~tf_clobber && File_Test(file) $
+				THEN Message, 'File exists. Set CLOBBER keyword to overwrite.' $
+				ELSE OpenW, lun, file, /GET_LUN
+			
+		;Logical unit number was given
+		ENDIF ELSE IF MrIsA(file, /INTEGER) THEN BEGIN
+			stat = FStat(file)
+			IF stat.name EQ '' || stat.open EQ 0 $
+				THEN Message, 'FILE is not a valid logical unit number.' $
+				ELSE lun = file
+			
+		;Something else was given
+		ENDIF ELSE BEGIN
+			Message, 'FILE must be a file name or a logical unit number (LUN).'
+		ENDELSE
+	ENDIF
+
+;-------------------------------------------
+; Data Structure ///////////////////////////
+;-------------------------------------------
+	dims  = Size(self, /DIMENSIONS)
+	nDims = Size(self, /N_DIMENSIONS)
+	
+	;If there are DEPEND_1-3 attributes
+	IF ~Array_Equal(self -> HasAttr('DEPEND_' + ['1', '2', '3']), 0) $
+		THEN Message, 'I do not know how to export variables with DEPEND_[1,2,3] attributes.'
+	
+	;Should be equivalent to the DEPEND_1-3 clause
+	IF nDims GT 2 $
+		THEN Message, 'I do not know how to export variables with > 2 dimensions.'
+	
+	;Cread a data structure containing information on how the data
+	;should be written to the ASCII file.
+;	out = { data:   Ptr_New(/ALLOCATE_HEAP), $
+;	        header: '', $
+;	        fmt:    '' }
+	
+	;If there are more than one dimensions, expand the structure into
+	;and array, with one element per row, etc.
+;	IF nDims EQ 2 THEN BEGIN
+;		out = Replicate(out, dims[1])
+;		FOR i = 0, dims[1]-1 DO *out[i].data = self['DATA',*,i]
+;	ENDIF ELSE BEGIN
+;		*out.data = self['DATA']
+;	ENDELSE
+	
+;-------------------------------------------
+; Format Code //////////////////////////////
+;-------------------------------------------
+	IF self -> HasAttr('FORMAT') THEN BEGIN
+		fmt = self['FORMAT']
+	ENDIF ELSE BEGIN
+		sample = self['DATA',0]
+		CASE 1 OF
+			MrIsA(sample, 'STRING'): fmt = 'a' + String(Max(StrLen(self['DATA'])), FORMAT='(i0)')
+			MrIsA(sample, /INTEGER): fmt = 'i' + String(Ceil(ALog10(Max((self['DATA']))))+1, FORMAT='(i0)')
+			MrIsA(sample, /FLOAT, /REAL): BEGIN
+				
+				;Range of numbers
+				pmax = ALog10(Abs(Max(self['DATA'], MIN=pmin)))
+				pmin = ALog10(Abs(pmin))
+				pmax = pmax GT 0 ? Ceil(pmax) : Floor(pmax)
+				pmin = pmin GT 0 ? Ceil(pmin) : Floor(pmin)
+				
+				;Width of numbers
+				;   - Float:  Print allows 6 digits, 8 with /IMPLIED_PRINT
+				;   - Double: Print allows 8 digits, 16 with /IMPLIED_PRINT
+				;   - We will use 6 for float and 8 for double
+				IF Size(sample, /TNAME) EQ 'DOUBLE' THEN BEGIN
+					;Use scientific notation if numbers are too big/small or large dynamic range
+					CASE 1 OF
+						(pmax - pmin) GT 7: code = 'e'
+						pmax GT 8:          code = 'e'
+						pmax LT -7:         code = 'e'
+						pmin LT -7:         code = 'e'
+						ELSE:               code = 'f'
+					ENDCASE
+					width = code EQ 'e' ? 14 : 10
+					dec   = code EQ 'e' ?  7 : (8-pmax) > 0
+					fmt   = String( code, width, dec, FORMAT='(%"%1s%0i.%0i")')
+				
+				;Single precision
+				ENDIF ELSE BEGIN
+					;Use scientific notation if numbers are too big/small or large dynamic range
+					CASE 1 OF
+						(pmax - pmin) GT 5: code = 'e'
+						pmax GT 6:          code = 'e'
+						pmax LT -5:         code = 'e'
+						pmin LT -5:         code = 'e'
+						ELSE:               code = 'f'
+					ENDCASE
+					width = code EQ 'e' ? 12 : 8
+					dec   = code EQ 'e' ?  5 : (6-pmax) > 0
+					fmt   = String( code, width, dec, FORMAT='(%"%1s%0i.%0i")')
+				ENDELSE
+			ENDCASE
+		ENDCASE
+	ENDELSE
+	
+	;Write each column the same as the first
+	IF nDims GT 2 THEN fmt = String(dims[1], FORMAT='(i0)') + '('+fmt+',1x)'
+
+;-------------------------------------------
+; Header ///////////////////////////////////
+;-------------------------------------------
+	;Width of 
+;	width = StRegEx(fmt, '^[aefi]([0-9]+)', /EXTRACT, /SUBEXP)
+;	width = Fix(width[1])
+	
+	
+;	IF self -> HasAttr('LABLAXIS') THEN BEGIN
+;		header = self['LABLAXIS']
+;	ENDIF ELSE IF self -> HasAttr('LABEL') THEN BEGIN
+;		header = self['LABEL']
+;		IF N_Elements(label) NE dims[1] THEN header = ''
+;	ENDIF ELSE IF self -> HasAttr('LABL_PTR_1') THEN BEGIN
+;		header = (self['LABL_PTR_1'])['DATA'] 
+;	ENDIF ELSE BEGIN
+;		header = ''
+;	ENDELSE
+	
+;	nHeader = N_Elements(header)
+;	header  = 'V' + String(IndGen(nHeader), FORMAT='(i0)') + '_' + header
+	
+;-------------------------------------------
+; DEPEND_0 /////////////////////////////////
+;-------------------------------------------
+	tf_dep0 = self -> HasAttr('DEPEND_0')
+	IF tf_dep0 THEN BEGIN
+		self['DEPEND_0'] -> ExportToASCII, FORMAT=dep_fmt, HEADER=dep_hdr
+		fmt = dep_fmt + ', 1x, ' + fmt
+	ENDIF
+	
+;-------------------------------------------
+; Write the Data ///////////////////////////
+;-------------------------------------------
+	IF tf_write THEN BEGIN
+		header    = StrArr(7)
+		nHeader   = N_Elements(header)
+		header[0] = String(dims[0]+nHead, FORMAT='(%"Lines:         %i")')
+		header[1] = String(dims[0]+nHead, FORMAT='(%"Lines:         %i")')
+		header[2] = String(6,             FORMAT='(%"Header:        %i")')
+		header[3] = String(fmt,           FORMAT='(%"Format Code:   \"%s\"")')
+		header[4] = String(self.name,     FORMAT='(%"Variable Name: \"%s\"")')
+		header[5] = String('',            FORMAT='(%"Columns:       [%s]")')  ;StrJoin(labels, ', ')
+		header[6] = 'DATA:'
+		
+		oDep0 = self['DEPEND_0']
+		IF tf_dep0 $
+			THEN FOR i = 0, dims[0]-1 DO PrintF, lun, oDep0['DATA',i], self['DATA',i,*], FORMAT='('+fmt+')' $
+			ELSE FOR i = 0, dims[0]-1 DO PrintF, lun, self['DATA',i], FORMAT='('+fmt+')'
+		
+		Close, lun
+	ENDIF
+END
+
+;+
 ;   Write data to a CDF file.
 ;
 ;   NOTE:

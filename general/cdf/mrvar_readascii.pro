@@ -270,6 +270,7 @@ VERBOSE=verbose
 	;Defaults
 	if n_elements(vartype)   eq 0 then vartype   = ''
 	if n_elements(varformat) eq 0 then varformat = '*'
+	if n_elements(trange)    eq 0 then trange    = MrVar_GetTRange()
 	nVarFmt = n_elements(varformat)
 
 ;-----------------------------------------------------
@@ -303,13 +304,18 @@ VERBOSE=verbose
 ; Time Series Data \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	if nEpoch gt 0 then begin
+		if size(data.(iEpoch), /N_DIMENSIONS) eq 2 then begin
+			epoch = strjoin(data.epoch, ' ')
+			data  = MrStruct_ReplaceValue(data, {EPOCH: epoch})
+		endif
+		
 		;Extract the time
 		oTime = MrTimeVar( data.(iEpoch), t_type, $
 		                   NAME  = varnames[iEpoch], $
 		                   /NO_CLOBBER, $
 		                   T_REF = t_ref )
 		varnames[iEpoch] = oTime.name
-
+		
 		;Create MrTimeSeries variables
 		iMatch = intarr(nVars)
 		nMatch = 0
@@ -346,7 +352,7 @@ VERBOSE=verbose
 
 		;Trim time
 		;   - The epoch variable is not in the cache
-		if count gt 0 then begin
+		if nMatch gt 0 && ~Array_Equal(trange, '') then begin
 			varnames = varnames[iMatch]
 			MrVar_TLimit, varnames, trange
 		endif else begin

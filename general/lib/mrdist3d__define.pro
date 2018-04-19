@@ -298,6 +298,15 @@ FUNCTION MrDist3D::Entropy
 	q       = MrConstants('q')
 	eV2J    = MrConstants('eV2J')
 	tf_vsc  = N_Elements(*self.Vsc) GT 0
+	
+	;Check for zero values -- bad for ALog()
+	tf_nan = 0B
+	ftemp  = *self.distfn
+	iZero  = Where(*self.distfn EQ 0, nZero)
+	IF nZero GT 0 THEN BEGIN
+		ftemp[iZero] = !Values.F_NaN
+		tf_nan = 1B
+	ENDIF
 
 ;-----------------------------------------------------
 ; Integration Bins and their Sizes \\\\\\\\\\\\\\\\\\\
@@ -336,18 +345,18 @@ FUNCTION MrDist3D::Entropy
 ;-----------------------------------------------------
 	
 	;Integrate Phi
-	ftemp = Total( *self.distfn * alog(*self.distfn), 1) * dPhi
+	ftemp = Total( ftemp * ALog(ftemp), 1, NAN=tf_nan) * dPhi
 	
 	;Integrate Theta
-	ftemp  = Total( ftemp * Sin(theta), 1) * dTheta
+	ftemp  = Total( ftemp * Sin(theta), 1, NAN=tf_nan) * dTheta
 	
 	;Integrate velocity
 	;   - Sign is charge dependent. E = q * V = 1/2 * m * v^2
 	;   - V is in m/s while f is in s^3/cm^6
 	;   - f --> s^3/cm^6  --> s^3/m^6 * 1e12
 	IF tf_Vsc $
-		THEN H = Total( ftemp * v * Sqrt(v^2 + sgn*vsc^2) * dv ) * 1e12 $
-		ELSE H = Total( ftemp * v^2 * dv ) * 1e12
+		THEN H = Total( ftemp * v * Sqrt(v^2 + sgn*vsc^2) * dv, NAN=tf_nan ) * 1e12 $
+		ELSE H = Total( ftemp * v^2 * dv, NAN=tf_nan ) * 1e12
 	
 	;Entropy:
 	;   - S = -kH
@@ -758,7 +767,7 @@ FUNCTION MrDist3D::HeatFlux
 	dv   = eV2J * dE / (self.mass * v)
 	
 	;We need to be in the rest frame of the plasma
-	;   - Convert BULKV from m/s to km/s
+	;   - Convert BULKV from km/s to m/s
 	bulkv = self -> Velocity()
 	v     = v - Sqrt( Total(bulkv^2) ) * 1e3
 	
@@ -899,7 +908,14 @@ THETA_RANGE=theta_range
 	eV2J    = MrConstants('eV2J')
 	eV2K    = 11600.0
 	kB      = MrConstants('k_B')
-	tf_nan  = ~Array_Equal( finite(*self.distfn), 1 )
+	
+	tf_nan = 0B
+	f      = *self.distfn
+	iZero  = Where(*self.distfn EQ 0, nZero)
+	IF nZero GT 0 THEN BEGIN
+		f[iZero] = !Values.F_NaN
+		tf_nan = 1B
+	ENDIF
 	
 	;Which products to return
 	tf_n = Arg_Present(density)
@@ -911,7 +927,7 @@ THETA_RANGE=theta_range
 	tf_p = tf_p || tf_t
 	tf_v = tf_v || tf_p || tf_q
 	tf_n = tf_n || tf_v || tf_p || tf_t || tf_q
-
+	
 ;-----------------------------------------------------
 ; Integration Bins and their Sizes \\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
@@ -956,7 +972,7 @@ THETA_RANGE=theta_range
 	dv = eV2J * dE / (self.mass * v)
 	
 	;Distribution function
-	f = (*self.distfn)[iPhi[0]:iPhi[1], iTheta[0]:iTheta[1], iEnergy[0]:iEnergy[1]]
+	f = f[iPhi[0]:iPhi[1], iTheta[0]:iTheta[1], iEnergy[0]:iEnergy[1]]
 
 	;PHI
 ;	dphi  = Median( (*self.phi)[1:*,*] - (*self.phi)[0:-2,*]) * deg2rad

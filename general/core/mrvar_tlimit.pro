@@ -180,7 +180,15 @@ PRO MrVar_TLimit, variables, trange
 		iKeep = Where( (t_ssm GE trange_ssm[0]) and (t_ssm LE trange_ssm[1]), nKeep)
 		IF nKeep EQ 0 THEN BEGIN
 			iKeep = Value_Locate(t_ssm, trange_ssm[0]) > 0
-			iKeep = [iKeep, iKeep+1]
+			CASE 1 OF
+				iKeep EQ N_Elements(t_ssm)-1: iKeep = [iKeep-1, iKeep]
+				iKeep EQ 0:                   iKeep = [iKeep, iKeep+1]
+				ELSE: BEGIN
+					IF t_ssm[iKeep]-trange_ssm[0] LT trange_ssm[0]-t_ssm[iKeep] $
+						THEN iKeep = [iKeep, iKeep+1] $
+						ELSE iKeep = [iKeep-1, iKeep]
+				ENDCASE
+			ENDCASE
 			MrPrintF, 'LogText', 'No data found in time interval for variable "' + theTime.name + '".'
 			MrPrintF, 'LogText', '  Interval: [' + StrJoin(trange, ', ') + ']'
 			MrPrintF, 'LogText', '  Closest:  [' + StrJoin(theTime['DATA', iKeep], ', ') + ']'

@@ -65,6 +65,7 @@
 ; :History:
 ;   Modification History::
 ;       2017-01-24  -   Written by Matthew Argall
+;       2018-03-06  -   Logic around file creation improved. Catch is cancelled. - MRA
 ;-
 ;*****************************************************************************************
 FUNCTION MrVar_ExportToSPEDAS, variables, filename
@@ -104,14 +105,16 @@ FUNCTION MrVar_ExportToSPEDAS, variables, filename
 	ENDCASE
 
 	;Save to file
-	Catch, the_error
-	IF the_error EQ 0 THEN BEGIN
-		IF N_Elements(filename) GT 0 $
-			THEN tplot_save, tnames, FILENAME=filename
-	ENDIF ELSE BEGIN
-		MrPrintF, 'LogText', 'Export successful. Error creating save file.'
-		MrPrintF, 'LogErr'
-	ENDELSE
+	IF N_Elements(filename) GT 0 THEN BEGIN
+		Catch, the_error
+		IF the_error EQ 0 THEN BEGIN
+			tplot_save, tnames, FILENAME=filename
+		ENDIF ELSE BEGIN
+			MrPrintF, 'LogText', 'Error creating TPlot save file.'
+			MrPrintF, 'LogErr'
+		ENDELSE
+		Catch, /CANCEL
+	ENDIF
 	
 	RETURN, tnames
 END

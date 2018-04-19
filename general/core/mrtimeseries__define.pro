@@ -98,6 +98,7 @@
 ;                           _OverloadBracketsRightSide returns and object with DEPEND_# and
 ;                           DELTA_(PLUS|MINUS)_VAR attributes are propertly reduced. - MRA
 ;       2017/05/31  -   Added the ::Digital_Filter method. - MRA
+;       2018/01/26  -   Added NO_CLOBBER keyword to ::Copy. Default changed to clobber. - MRA
 ;-
 ;*****************************************************************************************
 ;+
@@ -2309,9 +2310,16 @@ end
 ; :Keywords:
 ;       CACHE:          in, optional, type=boolean, default=0
 ;                       If set, the copy will be added to the variable cache
+;       NO_CLOBBER:     in, optional, type=boolean, default=0
+;                       If used with `CACHE` and a variable by the same name already
+;                           exists in the cache, `NAME` will have "_#" appended to it,
+;                           where # is the lowest integer that makes `NAME` unique.
+;                           The default is to delete and replace the variable in the cache.
+;                          
 ;-
 function MrTimeSeries::Copy, name, $
-CACHE=cache
+CACHE=cache, $
+NO_CLOBBER=no_clobber
 	compile_opt idl2
 	on_error, 2
 
@@ -2330,7 +2338,7 @@ CACHE=cache
 	self -> CopyAttrTo, theCopy
 	
 	;Cache the variable
-	if tf_cache then theCopy -> Cache, /NO_CLOBBER
+	if tf_cache then theCopy -> Cache, NO_CLOBBER=no_clobber
 	return, theCopy
 end
 
@@ -2365,19 +2373,15 @@ _REF_EXTRA=extra
 	
 	;Defaults
 	if n_elements(name) eq 0 then name = 'Detrend(' + self.name + ')'
-
-	;Remove a smoothed version
-	case size(self, /N_DIMENSIONS) of
-		1: data = self - smooth(self['DATA'], width, _STRICT_EXTRA=extra)
-		2: data = self - smooth(self['DATA'], [width,1], _STRICT_EXTRA=extra)
-		3: data = self - smooth(self['DATA'], [width,1,1], _STRICT_EXTRA=extra)
-		4: data = self - smooth(self['DATA'], [width,1,1,1], _STRICT_EXTRA=extra)
-		5: data = self - smooth(self['DATA'], [width,1,1,1,1], _STRICT_EXTRA=extra)
-		6: data = self - smooth(self['DATA'], [width,1,1,1,1,1], _STRICT_EXTRA=extra)
-		7: data = self - smooth(self['DATA'], [width,1,1,1,1,1,1], _STRICT_EXTRA=extra)
-		8: data = self - smooth(self['DATA'], [width,1,1,1,1,1,1,1], _STRICT_EXTRA=extra)
-		else: message, 'Internal array has invalid number of dimensions.'
-	endcase
+	
+	;Smoothing width along each dimension -- only apply to first dimension
+	nDims = size(self, /N_DIMENSIONS)
+	if nDims le 1 $
+		then nSmooth = width $
+		else nSmooth = [width, indgen(nDims-1)+1S]
+	
+	;Remove smoothed data
+	data = self - smooth(self['DATA'], nSmooth, _STRICT_EXTRA=extra)
 	
 	;Set properties
 	self -> CopyAttrTo, data
@@ -2415,7 +2419,7 @@ end
 ;
 ; :Returns:
 ;       VAROUT:         out, required, type=object
-;                       A MrScalarTS object containing the filtered data.
+;                       A MrTimeSeries object containing the filtered data.
 ;-
 FUNCTION MrTimeSeries::Digital_Filter, fLow, fHigh, A, nTerms, $
 CACHE=cache, $
@@ -2444,11 +2448,11 @@ NAME=name
 	IF nDims GT 2 THEN temp = Reform( temp, dims, /OVERWRITE )
 	
 	;Create the output variable
-	varOut = MrScalarTS( self.oTime, temp, $
-	                     CACHE     = cache, $
-	                     DIMENSION = 1, $
-	                     NAME      = name, $
-	                     /NO_COPY )
+	theClass = Obj_Class(self)
+	varOut = Obj_New( theClass, self.oTime, temp, $
+	                  CACHE     = cache, $
+	                  NAME      = name, $
+	                  /NO_COPY )
 	
 	;Return the new variable
 	RETURN, varOut

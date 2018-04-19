@@ -195,7 +195,7 @@ CACHE=cache
 	;Get the reciprocal vectors
 	;   - Array of MrVectorTS objects
 	oRV = self -> ReciprocalVectors()
-
+	
 	;Compute the curl
 	oCurl = oRV[0] -> Cross( oPP[0] )
 	for i = 1, 3 do oCurl += oRV[i] -> Cross( oPP[i] )

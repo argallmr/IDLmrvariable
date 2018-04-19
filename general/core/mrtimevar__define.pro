@@ -943,7 +943,7 @@ TOKEN_FMT=token_fmt
 			then type = 'ISO-8601' $
 			else type = 'CUSTOM'
 	endif
-
+	
 	;Convert to ISO-8601
 	case strupcase(type) of
 		'CDF_TIME_TT2000': time = self -> iso2tt2000(*self.data)
