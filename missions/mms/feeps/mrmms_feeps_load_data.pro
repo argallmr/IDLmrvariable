@@ -57,8 +57,151 @@
 ; :History:
 ;   Modification History::
 ;       2017/03/25  -   Written by Matthew Argall
+;       2018/02/02  -   Sun contamination CSV files are time-dependent. Updated read
+;                           routine. Set of bad sectors has also been updated. - MRA
 ;-
 ;*****************************************************************************************
+;+
+;
+;-
+FUNCTION MrMMS_FEEPS_Load_Data_Active_Eyes, mode, species
+	Compile_Opt idl2
+	On_Error, 2
+	
+	;Create a hash table
+	active = hash()
+	
+	;BRST mode
+	IF mode EQ 'brst' THEN BEGIN
+		IF species EQ 'electron' THEN BEGIN
+			active['mms1-top']    = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+			active['mms1-bottom'] = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+			active['mms2-top']    = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+			active['mms2-bottom'] = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+			active['mms3-top']    = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+			active['mms3-bottom'] = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+			active['mms4-top']    = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+			active['mms4-bottom'] = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+		ENDIF ELSE BEGIN
+			active['mms1-top']    = [6, 7, 8]
+			active['mms1-bottom'] = [6, 7, 8]
+			active['mms2-top']    = [6, 7, 8]
+			active['mms2-bottom'] = [6, 7, 8]
+			active['mms3-top']    = [6, 7, 8]
+			active['mms3-bottom'] = [6, 7, 8]
+			active['mms4-top']    = [6, 7, 8]
+			active['mms4-bottom'] = [6, 7, 8]
+		ENDELSE
+	
+	;SRVY mode
+	;   - Which eyes are active switched during the mission
+	ENDIF ELSE BEGIN
+		;Beginning of data interval & switch dates
+		tswitch = MrCDF_Compute_TT2000(2017, 08, 16)
+		t0      = (MrVar_GetTRange('TT2000'))[0]
+		
+		;BEFORE 2017-08-16
+		IF t0 LT tswitch THEN BEGIN
+			IF species EQ 'electron' THEN BEGIN
+				active['mms1-top']    = [3, 4, 5, 11, 12]
+				active['mms1-bottom'] = [3, 4, 5, 11, 12]
+				active['mms2-top']    = [3, 4, 5, 11, 12]
+				active['mms2-bottom'] = [3, 4, 5, 11, 12]
+				active['mms3-top']    = [3, 4, 5, 11, 12]
+				active['mms3-bottom'] = [3, 4, 5, 11, 12]
+				active['mms4-top']    = [3, 4, 5, 11, 12]
+				active['mms4-bottom'] = [3, 4, 5, 11, 12]
+			ENDIF ELSE BEGIN
+				active['mms1-top']    = [6, 7, 8]
+				active['mms1-bottom'] = [6, 7, 8]
+				active['mms2-top']    = [6, 7, 8]
+				active['mms2-bottom'] = [6, 7, 8]
+				active['mms3-top']    = [6, 7, 8]
+				active['mms3-bottom'] = [6, 7, 8]
+				active['mms4-top']    = [6, 7, 8]
+				active['mms4-bottom'] = [6, 7, 8]
+			ENDELSE
+			
+		;AFTER 2017-08-16
+		ENDIF ELSE BEGIN
+			IF species EQ 'electron' THEN BEGIN
+				active['mms1-top']    = [3, 5, 9, 10, 12]
+				active['mms1-bottom'] = [2, 4, 5, 9, 10]
+				active['mms2-top']    = [1, 2, 3, 5, 10, 11]
+				active['mms2-bottom'] = [1, 4, 5, 9, 11]
+				active['mms3-top']    = [3, 5, 9, 10, 12]
+				active['mms3-bottom'] = [1, 2, 3, 9, 10]
+				active['mms4-top']    = [3, 4, 5, 9, 10, 11]
+				active['mms4-bottom'] = [3, 5, 9, 10, 12]
+			ENDIF ELSE BEGIN
+				active['mms1-top']    = [6, 7, 8]
+				active['mms1-bottom'] = [6, 7, 8]
+				active['mms2-top']    = [6, 8]
+				active['mms2-bottom'] = [6, 7, 8]
+				active['mms3-top']    = [6, 7, 8]
+				active['mms3-bottom'] = [6, 7, 8]
+				active['mms4-top']    = [6, 8]
+				active['mms4-bottom'] = [6, 7, 8]
+			ENDELSE
+		ENDELSE
+	ENDELSE
+	
+	RETURN, active
+END
+
+
+;+
+;       Apply flat field correction factors to FEEPS ion/electron data;
+;       correct factors are from the gain factor found in:
+;       
+;           FlatFieldResults_V3.xlsx
+;           
+;       from Drew Turner, 1/19/2017
+;
+; NOTES:
+; 
+;   From Drew Turner, 1/18/17:
+;       Here are the correction factors that we need to apply to the current 
+;       ION counts/rates/fluxes in the CDF files.  
+;       NOTE, THIS IS A DIFFERENT TYPE OF CORRECTION THAN THAT FOR THE ELECTRONS!  
+;       These shifts should be applied to the counts/rates/fluxes data EYE-BY-EYE on each spacecraft.  
+;       These are multiplication factors (i.e., Jnew = Jold * Gcorr). 
+;       For those equations, Jold is the original count/rate/flux array and
+;       Jnew is the corrected version of the arrays using the factors listed below.
+;
+; NOTES:
+;     BAD EYES are replaced by NaNs
+;
+;     See the spedas distribution
+;         idl/projects/mms/feeps/mms_feeps_flat_field_corrections
+;-
+PRO MrMMS_FEEPS_Load_Data_Bad_Sectors, theVar
+	Compile_Opt idl2
+	On_Error, 2
+	
+	;Which spacecraft and eye?
+	parts   = StrSplit(theVar.name, '_', /EXTRACT)
+	sc      = parts[0]
+	instr   = parts[1]
+	instrid = parts[2]
+	mode    = parts[3]
+	level   = parts[4]
+	species = parts[5]
+	eye     = parts[6]
+	units   = parts[7]
+	sensor  = parts[8]
+	sid     = parts[9]
+	
+	;Get the sector mask for this variable
+	mask_vname = StrJoin([sc, instr, instrid, mode, level, species, eye, 'sector', 'mask', sensor, sid], '_')
+	oMask      = MrVar_Get(mask_vname)
+	
+	;Mask the data
+	iBad = oMask -> Where(1, /EQUAL, COUNT=nBad)
+	IF nBad GT 0 THEN theVar[iBad] = !Values.F_NaN
+END
+
+
 ;+
 ;       Apply flat field correction factors to FEEPS ion/electron data;
 ;       correct factors are from the gain factor found in:
@@ -100,8 +243,8 @@ PRO MrMMS_FEEPS_Load_Data_Bad_Eyes, theVar
 	;
 	
 	ebad                = hash()
-;	ebad['mms1-top']    = []
-	ebad['mms1-bottom'] = [1]
+	ebad['mms1-top']    = [1]
+	ebad['mms1-bottom'] = [1, 11]
 	ebad['mms2-top']    = [5, 12]
 ;	ebad['mms2-bottom'] = []
 	ebad['mms3-top']    = [2, 12]
@@ -142,25 +285,25 @@ PRO MrMMS_FEEPS_Load_Data_Bad_Eyes, theVar
 	; Eyes for which the first energy channel is bad
 	;
 	
-	ebad             = hash()
-;	ebad['mms1-top'] = []
-	ebad['mms1-bot'] = [2, 3, 4, 5, 9, 11, 12] ;11
-	ebad['mms2-top'] = [2, 3, 4, 10, 12]
-	ebad['mms2-bot'] = [1, 2, 3, 4, 5, 9, 10, 11, 12]
-	ebad['mms3-top'] = [4, 5, 9, 10]
-	ebad['mms3-bot'] = [1, 4, 9, 10, 11, 12]
-	ebad['mms4-top'] = [3, 5, 9, 12]
-	ebad['mms4-bot'] = [1, 3, 9, 12 ]
+	ebad                = hash()
+	ebad['mms1-top']    = [2, 5]
+	ebad['mms1-bottom'] = [2, 3, 4, 5, 9, 11, 12] ;11
+	ebad['mms2-top']    = [1, 2, 3, 4, 9, 10, 11, 12]
+	ebad['mms2-bottom'] = [1, 2, 3, 4, 5, 9, 10, 11, 12]
+	ebad['mms3-top']    = [4, 5, 9, 10, 11]
+	ebad['mms3-bottom'] = [1, 3, 4, 9, 10, 11, 12]
+	ebad['mms4-top']    = [3, 4, 5, 9, 10, 11, 12]
+	ebad['mms4-bottom'] = [1, 3, 9, 12]
 	
-	ibad             = hash()
-	ibad['mms1-top'] = [6]
-	ibad['mms1-bot'] = [7, 8]
-	ibad['mms2-top'] = [8] ;8
-	ibad['mms2-bot'] = [6, 8, 12] ;12
-	ibad['mms3-top'] = [2, 6, 7] ;2
-	ibad['mms3-bot'] = [6, 7]
-;	ibad['mms4-top'] = []
-	ibad['mms4-bot'] = [6, 7] ;6
+	ibad                = hash()
+	ibad['mms1-top']    = [6]
+	ibad['mms1-bottom'] = [7, 8]
+	ibad['mms2-top']    = [8] ;8
+	ibad['mms2-bottom'] = [6, 8, 12] ;12
+	ibad['mms3-top']    = [2, 6, 7] ;2
+	ibad['mms3-bottom'] = [6, 7]
+;	ibad['mms4-top']    = []
+	ibad['mms4-bottom'] = [6, 7] ;6
 	
 	;Ions
 	IF species EQ 'ion' THEN BEGIN
@@ -182,28 +325,25 @@ PRO MrMMS_FEEPS_Load_Data_Bad_Eyes, theVar
 	; Eyes for which the second energy channel is bad
 	;
 	
-	ebad             = hash()
-;	ebad['mms1-top'] = []
-	ebad['mms1-bot'] = [11]
-;	ebad['mms2-top'] = []
-;	ebad['mms2-bot'] = []
-;	ebad['mms3-top'] = []
-;	ebad['mms3-bot'] = []
-;	ebad['mms4-top'] = []
-;	ebad['mms4-bot'] = []
+	ebad                = hash()
+;	ebad['mms1-top']    = []
+;	ebad['mms1-bottom'] = []
+;	ebad['mms2-top']    = []
+	ebad['mms2-bottom'] = [12]
+	ebad['mms3-top']    = [1]
+;	ebad['mms3-bottom'] = []
+;	ebad['mms4-top']    = []
+;	ebad['mms4-bottom'] = []
 	
-	ibad             = hash()
-;	ibad['mms1-top'] = []
-;	ibad['mms1-bot'] = []
-	ibad['mms2-top'] = [8]
-	ibad['mms2-bot'] = [12]
-	ibad['mms3-top'] = [2]
-;	ibad['mms3-bot'] = []
-;	ibad['mms4-top'] = []
-	ibad['mms4-bot'] = [6]
-	
-	;Get the energy table
-	theVar[*,1]   = !values.f_nan
+	ibad                = hash()
+	ibad['mms1-top']    = [6, 7]
+	ibad['mms1-bottom'] = [6, 7, 8]
+	ibad['mms2-top']    = [8]
+	ibad['mms2-bottom'] = [6, 8]
+	ibad['mms3-top']    = [6, 7]
+	ibad['mms3-bottom'] = [6, 7]
+	ibad['mms4-top']    = [6]
+	ibad['mms4-bot']    = [7]
 	
 	;Ions
 	IF species EQ 'ion' THEN BEGIN
@@ -363,10 +503,12 @@ FUNCTION MrMMS_FEEPS_Load_Data_Integral_Channel, theVar
 	;Create variables
 	o500keV  = theVar[*, -1]
 	
-	;Remove teh 500keV channel
+	;Remove the 500keV channel
+	;   - Make sure to output the new variable via THEVAR
 	newVar  = theVar[*,0:-2]
 	newVar -> SetName, theVar.name
 	MrVar_Replace, theVar, newVar
+	theVar  = newVar
 	
 	;Add 500keV to the cache
 	o500keV -> SetName, int_vname
@@ -407,41 +549,34 @@ FUNCTION MrMMS_FEEPS_Load_Data_Omni, varname
 	;   - The eye and sensor have been replaced with the "#" character
 	;   - The sc, instr, mode, and level occur before the first "#"
 	segs    = StrSplit(varname[0], '*', /EXTRACT, COUNT=nSegs)
-	parts   = StrSplit(segs[0], '_', /EXTRACT)
+	parts   = [StrSplit(segs[0], '_', /EXTRACT), StrSplit(segs[1], '_', /EXTRACT)]
 	sc      = parts[0]
 	instr   = parts[1] + '_' + parts[2]
 	mode    = parts[3]
 	level   = parts[4]
 	species = parts[5]
+	units   = parts[6]
+	sensor  = parts[7]
 	
 	;
 	; Available sensors
 	;
 	
-	;Electrons
-	IF species EQ 'electron' THEN BEGIN
-		;Sensor ID
-		IF level EQ 'sitl' $
-			THEN sensors = ['5','11','12'] $
-			ELSE sensors = mode EQ 'brst' ? ['1','2','3','4','5','9','10','11','12'] : ['3', '4', '5', '11', '12']
-	
-	;Ions
-	ENDIF ELSE BEGIN
-		;Sensor ID
-		sensors = ['6', '7', '8']
-	ENDELSE
+	sensors = MrMMS_FEEPS_Load_Data_Active_Eyes(mode, species)
 	
 	;Variable names of each sensor
-	top_vnames = segs[0] + 'top'    + segs[1] + sensors
-	bot_vnames = segs[0] + 'bottom' + segs[1] + sensors
+	top_vnames    = StrJoin( [parts[0:5], 'top',    units,           sensor], '_') + '_' + String(sensors[sc+'-top'],    FORMAT='(i0)')
+	top500_vnames = StrJoin( [parts[0:5], 'top',    units, '500keV', sensor], '_') + '_' + String(sensors[sc+'-top'],    FORMAT='(i0)')
+	bot_vnames    = StrJoin( [parts[0:5], 'bottom', units,           sensor], '_') + '_' + String(sensors[sc+'-bottom'], FORMAT='(i0)')
+	bot500_vnames = StrJoin( [parts[0:5], 'bottom', units, '500keV', sensor], '_') + '_' + String(sensors[sc+'-bottom'], FORMAT='(i0)')
 	IF nSegs GT 2 THEN BEGIN
 		top_vnames += segs[2:*]
 		bot_vnames += segs[2:*]
 	ENDIF
 	
 	;Ouput name
-	omni_vname = segs[0] + 'omni' + segs[1:*]
-	omni_vname = StrJoin( (StRegEx(omni_vname, '(.*)_sensorid_(.*)', /SUBEXP, /EXTRACT))[[1,2]] )
+	omni_vname    = StrJoin( [parts[0:5], units, 'omni'          ], '_')
+	omni500_vname = StrJoin( [parts[0:5], units, 'omni', '500keV'], '_')
 	
 	;Are the names present?
 	IF ~Array_Equal( MrVar_IsCached( [top_vnames, bot_vnames] ), 1) THEN BEGIN
@@ -497,61 +632,62 @@ FUNCTION MrMMS_FEEPS_Load_Data_Omni, varname
 	dims     = oVar.dimensions
 	nTime    = dims[0]
 	nEnergy  = dims[1]
+	nTop     = N_Elements(sensors[sc+'-top'])
+	nBottom  = N_Elements(sensors[sc+'-bottom'])
 	nSensors = N_Elements(sensors)
-	omni     = FltArr(nTime, nEnergy, 2*nSensors)
+	omni     = FltArr(nTime, nEnergy, nTop + nBottom) + !Values.F_NaN
+	omni500  = FltArr(nTime, nTop + nBottom) + !Values.F_NaN
 	
-	FOR i = 0, 2*nSensors-1, 2 DO BEGIN
-		iSensor = Fix(i/2)
-		
-		;Bottom
-		IF MrVar_IsCached(bot_vnames[iSensor]) THEN BEGIN
-			;Collect the data
-			oVar        = MrVar_Get(bot_vnames[iSensor])
-			omni[0,0,i] = oVar['DATA']
-			
-			;Energies
-			oE   = oVar['DEPEND_1']
-			iBad = Where( Abs( oE['DATA'] - Energies ) GT 0.1*Energies, nBad)
-			IF nBad GT 0 THEN oE[*,iBad] = !Values.F_NaN
-		ENDIF ELSE BEGIN
-			MrPrintF, 'LogWarn', 'Sensor not found: "' + bot_vnames[iSensor] + '".'
-		ENDELSE
-		
-		;TOP
+	;TOP
+	FOR iSensor = 0, nTop - 1 DO BEGIN
 		IF MrVar_IsCached(top_vnames[iSensor]) THEN BEGIN
 			;Collect the data
-			oVar          = MrVar_Get(top_vnames[iSensor])
-			omni[0,0,i+1] = oVar['DATA']
+			oVar               = MrVar_Get(top_vnames[iSensor])
+			oVar500            = MrVar_Get(top500_vnames[iSensor])
+			omni[0,0,iSensor]  = oVar['DATA']
+			omni500[0,iSensor] = oVar500['DATA']
 			
 			;Energies
 			oE   = oVar['DEPEND_1']
 			iBad = Where( Abs( oE['DATA'] - Energies ) GT 0.1*Energies, nBad)
-			IF nBad GT 0 THEN oE[*,iBad] = !Values.F_NaN
+			IF nBad GT 0 THEN omni[*,iBad,iSensor] = !Values.F_NaN
 		ENDIF ELSE BEGIN
 			MrPrintF, 'LogWarn', 'Sensor not found: "' + top_vnames[iSensor] + '".'
 		ENDELSE
 	ENDFOR
-
+	
+	;BOTTOM
+	FOR iSensor = 0, nBottom-1 DO BEGIN
+		IF MrVar_IsCached(bot_vnames[iSensor]) THEN BEGIN
+			;Collect the data
+			oVar                    = MrVar_Get(bot_vnames[iSensor])
+			oVar500                 = MrVar_Get(top500_vnames[iSensor])
+			omni[0,0,iSensor+nTop]  = oVar['DATA']
+			omni500[0,iSensor+nTop] = oVar500['DATA']
+			
+			;Energies
+			oE   = oVar['DEPEND_1']
+			iBad = Where( Abs( oE['DATA'] - Energies ) GT 0.1*Energies, nBad)
+			IF nBad GT 0 THEN omni[*,iBad,iSensor+nTop] = !Values.F_NaN
+		ENDIF ELSE BEGIN
+			MrPrintF, 'LogWarn', 'Sensor not found: "' + bot_vnames[iSensor] + '".'
+		ENDELSE
+	ENDFOR
+	
+	;Average the data
+	flux_omni    = Mean( omni,    DIMENSION=3, /NAN )
+	flux_omni500 = Mean( omni500, DIMENSION=2, /NAN )
+	
 ;-------------------------------------------
 ; Gain Correction //////////////////////////
 ;-------------------------------------------
 	
 	IF StRegEx(species, 'electron', /BOOLEAN) THEN BEGIN
-		CASE sc OF
-			'mms1': omni *= eGfact[0]
-			'mms2': omni *= eGfact[1]
-			'mms3': omni *= eGfact[2]
-			'mms4': omni *= eGfact[3]
-			ELSE: Message, 'Invalid spacecraft: "' + sc + '".'
-		ENDCASE
+		omni    *= eGfact[Fix(StrMid(sc, 3, 1)) - 1]
+		omni500 *= eGfact[Fix(StrMid(sc, 3, 1)) - 1]
 	ENDIF ELSE BEGIN
-		CASE sc OF
-			'mms1': omni *= iGfact[0]
-			'mms2': omni *= iGfact[1]
-			'mms3': omni *= iGfact[2]
-			'mms4': omni *= iGfact[3]
-			ELSE: Message, 'Invalid spacecraft: "' + sc + '".'
-		ENDCASE
+		omni    *= iGfact[Fix(StrMid(sc, 3, 1)) - 1]
+		omni500 *= iGfact[Fix(StrMid(sc, 3, 1)) - 1]
 	ENDELSE
 
 ;-------------------------------------------
@@ -561,37 +697,301 @@ FUNCTION MrMMS_FEEPS_Load_Data_Omni, varname
 	;Energy variable
 	oEnergy = MrVariable(energies, NAME=e_vname, /NO_COPY)
 	oEnergy['LOG']   = 1B
-	oEnergy['TITLE'] = 'Energy!C(eV)'
-	oEnergy['UNITS'] = 'eV'
+	oEnergy['TITLE'] = 'Energy!C(keV)'
+	oEnergy['UNITS'] = 'keV'
 	
-	;Create a variable
-	oOmni = MrTimeSeries( oVar['TIMEVAR'], Mean( omni, DIMENSION=3, /NAN ), $
+	;Omni
+	oOmni = MrTimeSeries( oVar['TIMEVAR'], flux_omni, $
 	                      /CACHE, $
 	                      NAME = omni_vname )
 	
 	;Attributes
-	oVar -> CopyAttrTo, oOmni, [ 'AXIS_RANGE', 'FILLVAL', 'FORMAT', 'LOG', 'SCALETYP', 'SCALEMAX', $
+	oVar -> CopyAttrTo, oOmni, [ 'FILLVAL', 'FORMAT', 'LOG', 'SCALETYP', 'SCALEMAX', $
 	                             'SCALEMIN', 'SI_CONVERSION', 'UNITS', 'VALIDMIN', 'VALIDMAX']
+	
+;	range = [oOmni.min, oOmni.max]
+;	IF oOmni['LOG'] && range[0] LE 0 THEN range[0] = 1e-1
+;	oOmni['AXIS_RANGE'] = range
 	oOmni['DEPEND_1']   = oEnergy
 	oOmni['NAN']        = 1B
-	oOmni['TITLE']      = 'Omin!C' + oOmni['UNITS']
+	oOmni['TITLE']      = 'Omni!C' + oOmni['UNITS']
 	oOmni['PLOT_TITLE'] = 'FEEPS Omni-Directional Flux'
+	
+	;Omni-500
+	oOmni500 = MrScalarTS( oVar['TIMEVAR'], flux_omni500, $
+	                       /CACHE, $
+	                       NAME = omni500_vname )
+	
+	;Attributes
+	oVar -> CopyAttrTo, oOmni500, [ 'FILLVAL', 'FORMAT', 'LOG', 'SCALETYP', 'SCALEMAX', $
+	                                'SCALEMIN', 'SI_CONVERSION', 'UNITS', 'VALIDMIN', 'VALIDMAX']
+	oOmni500['TITLE']      = 'Omni >500keV!C' + oOmni500['UNITS']
+	oOmni500['PLOT_TITLE'] = 'FEEPS Integrated Omni-Directional Flux >500keV'
+END
+
+
+
+;+
+;    Create pitch angle distributions of FEEPS ion and electron data.
+;
+; :Params:
+;       VARNAME:        in, required, type=string
+;                       Name of a MrTimeSeries variable for which a pitch angle
+;                           distribution is made.
+;       OPA:            in, required, type=objref
+;                       A MrVariable containing the pitch angles of each sector.
+;
+; :Keywords:
+;       DPA:            in, optional, type=float
+;                       Width of the pitch angle bins in the output distribution. If
+;                           neither DPA nor `NPA_BINS` are given, the default is 60.0/22.0.
+;                           If `NPA_BINS` is given, DPA is calculated from it and `PA_RANGE`.
+;       E_RANGE:        in, optional, type=fltarr(2), default=[70, 600]
+;                       Energy range (keV) over which the PAD is created.
+;       NPA_BINS:       in, optional, type=float
+;                       Number of pitch angle bins to create. If `DPA` is given, the
+;                           default is calculated from it and `PA_RANGE`.
+;       PA_RANGE:       in, optional, type=float, default=[0.0, 180.0]
+;                       The pitch angle range over which the PAD is created.
+;
+; :Returns:
+;       OPAD:           out, required, type=objref
+;                       A MrTimeSeries variable containing the pitch angle distribution.
+;-
+FUNCTION MrMMS_FEEPS_Load_Data_PAD, varname, oPA, $
+DPA=dPA, $
+E_RANGE=e_range, $
+NPA_BINS=nPA_bins, $
+PA_RANGE=pa_range
+	Compile_Opt idl2
+	On_Error, 2
+	
+	;Defaults
+	IF N_Elements(pa_range) EQ 0 THEN pa_range = [0.0, 180.0]   ;degrees
+	IF N_Elements(e_range)  EQ 0 THEN e_range  = [70, 600]       ;keV
+	IF N_Elements(dPA) EQ 0 && N_Elements(nPA_bins) EQ 0 THEN dPA = 360.0/22.0
+	
+	;Conflicts
+	IF N_Elements(dPA) GT 1 && N_Elements(nPA_bins) GT 1 $
+		THEN Message, 'DPA and NPA_BINS are mutually exclusive.'
+	
+;-------------------------------------------
+; Bin Information //////////////////////////
+;-------------------------------------------
+	IF N_Elements(dPA) GT 0 $
+		THEN nPA_bins = Long( (pa_range[1] - pa_range[0]) / dPA ) + 1 $
+		ELSE dPA      = (pa_range[1] - pa_range[0]) / nPA_bins
+	pa_bins = linspace(pa_range[0], pa_range[1], nPA_bins)
+	
+;-------------------------------------------
+; Variable Names ///////////////////////////
+;-------------------------------------------
+	
+	;Dissect the variable names
+	;   - The eye and sensor have been replaced with the "#" character
+	;   - The sc, instr, mode, and level occur before the first "#"
+	segs    = StrSplit(varname[0], '*', /EXTRACT, COUNT=nSegs)
+	parts   = [StrSplit(segs[0], '_', /EXTRACT), StrSplit(segs[1], '_', /EXTRACT)]
+	sc      = parts[0]
+	instr   = parts[1] + '_' + parts[2]
+	mode    = parts[3]
+	level   = parts[4]
+	species = parts[5]
+	units   = parts[6]
+	sensor  = parts[7]
+	
+	;Available sensors
+	;   - DANGRESP = Angular response (finite field of view) of instruments
+	dAngResp = species EQ 'electron' ? 21.4 : 10
+	sensors  = MrMMS_FEEPS_Load_Data_Active_Eyes(mode, species)
+	
+	;Variable names of each sensor
+	top_vnames    = StrJoin( [parts[0:5], 'top',    units,           sensor], '_') + '_' + String(sensors[sc+'-top'],    FORMAT='(i0)')
+	top500_vnames = StrJoin( [parts[0:5], 'top',    units, '500keV', sensor], '_') + '_' + String(sensors[sc+'-top'],    FORMAT='(i0)')
+	bot_vnames    = StrJoin( [parts[0:5], 'bottom', units,           sensor], '_') + '_' + String(sensors[sc+'-bottom'], FORMAT='(i0)')
+	bot500_vnames = StrJoin( [parts[0:5], 'bottom', units, '500keV', sensor], '_') + '_' + String(sensors[sc+'-bottom'], FORMAT='(i0)')
+	IF nSegs GT 2 THEN BEGIN
+		top_vnames += segs[2:*]
+		bot_vnames += segs[2:*]
+	ENDIF
+	
+	;Ouput name
+	pa_bin_vname = StrJoin( [parts[0:5], units, 'pa',  'bins'  ], '_')
+	pad_vname    = StrJoin( [parts[0:5], units, 'pad'          ], '_')
+	pad500_vname = StrJoin( [parts[0:5], units, 'pad', '500keV'], '_')
+	
+	;Are the names present?
+	IF ~Array_Equal( MrVar_IsCached( [top_vnames, bot_vnames] ), 1) THEN BEGIN
+		MrPrintF, 'LogText', 'Not all sensors found: "' + varname + '".'
+		RETURN, !Null
+	ENDIF
+	
+;-------------------------------------------
+; Sector Indices ///////////////////////////
+;-------------------------------------------
+	;Get the channel IDs
+	theMode    = mode EQ 'brst' ? 'burst' : 'survey'
+	chan_vname = StrJoin( [parts[0:5], theMode, species, 'channel', 'ids'], '_')
+	oChan      = MrVar_Get(chan_vname)
+	
+	;Find the indices of the top and bottom channels
+	top_sensors = 'TOP_'    + String(sensors[sc+'-top'],    FORMAT='(i0)')
+	bot_sensors = 'BOTTOM_' + String(sensors[sc+'-bottom'], FORMAT='(i0)')
+	tf_top = MrIsMember( StrTrim(oChan['DATA'], 2), top_sensors, A_INDICES=iTop )
+	tf_bot = MrIsMember( StrTrim(oChan['DATA'], 2), bot_sensors, A_INDICES=iBot )
+	
+;-------------------------------------------
+; Average Energy & Combine /////////////////
+;-------------------------------------------
+	
+	;Allocate memory
+	oVar     = MrVar_Get(top_vnames[0])
+	dims     = oVar.dimensions
+	nTime    = dims[0]
+	nEnergy  = dims[1]
+	nTop     = N_Elements(iTop)
+	nBot     = N_Elements(iBot)
+	nSensors = nTop + nBot
+	
+	;All indices
+	iEyes = [iTop, iBot]
+	eye_vnames = [top_vnames, bot_vnames]
+	
+	;Combine sensors into a single array
+	alleyes = FltArr(nTime, nSensors); + !Values.F_NaN
+	allpas  = FltArr(nTime, nSensors) + !Values.F_NaN
+	FOR i = 0, nSensors - 1 DO BEGIN
+		;Average over the energy range
+		oVar = MrVar_Get(eye_vnames[iEyes[i]])
+		oE   = oVar['DEPEND_1']
+		iE   = Where(oE['DATA'] GE e_range[0] AND oE['DATA'] LE e_range[1], cE)
+		
+		IF cE EQ 0 THEN BEGIN
+			MrPrintF, 'LogWarn', 'No energies in range.'
+			CONTINUE
+		ENDIF
+		
+		;Set zeros equal to NaN
+		iZero = oVar -> Where(0.0, /EQUAL, COUNT=nZero)
+		IF nZero GT 0 THEN oVar[iZero] = !Values.F_NaN
+		
+		;Store into single variable
+		allpas[*,i] = oPA['DATA',*,iEyes[i]]
+		IF cE EQ 1 $
+			THEN alleyes[0,i] = oVar['DATA',*,iE] $
+			ELSE alleyes[0,i] = Mean(oVar['DATA',*,iE], DIMENSION=2, /NAN)
+	ENDFOR
+	
+;-------------------------------------------
+; Bin By Pitch Angle ///////////////////////
+;-------------------------------------------
+	;Allocate memory
+	pad      = FltArr(nTime, nPA_bins); + !Values.F_NaN
+;	pad500   = FltArr(nTime, nPA_bins) + !Values.F_NaN
+	
+	;Select only the sensors that are active
+	oPA = oPA[*,iEyes]
+	
+	;Bin the data
+	FOR i = 0, nTime - 1 DO BEGIN
+		FOR j = 0, nPA_Bins - 1 DO BEGIN
+			idx = Where( oPA['DATA',i,*]-dAngResp LE pa_bins[j]+dPA AND $
+			             oPA['DATA',i,*]+dAngResp GE pa_bins[j], count )
+
+			IF count GT 0 THEN BEGIN
+				IF count EQ 1 $
+					THEN pad[i,j] = alleyes[i,idx] $
+					ELSE pad[i,j] = Mean(alleyes[i,idx], DIMENSION=2, /NAN)
+			ENDIF
+		ENDFOR
+	ENDFOR
+	
+	;Loop over all points
+;	FOR i = 0, nTime - 1 DO BEGIN
+;		;Locate the data within the PA bins
+;		h = Histogram( oPA['DATA',i,*], $
+;		               MAX             = pa_range[1], $
+;		               MIN             = pa_range[0], $
+;		               NBINS           = nPA_bins, $
+;		               REVERSE_INDICES = ri )
+;		
+;		;Loop over each bin
+;		FOR j = 0, N_Elements(h) - 1 DO BEGIN
+;			nPA = ri[j+1] - ri[j]
+;			IF nPA EQ 0 THEN CONTINUE
+;			
+;			;Indices within the source
+;			iPA  = ri[ri[j]:ri[j+1]-1]
+;			
+;			;Form the PAD
+;			IF nPA EQ 1 $
+;				THEN pad[i,j] = alleyes[i,iPA] $
+;				ELSE pad[i,j] = Mean(alleyes[i,iPA], DIMENSION=2, /NAN)
+;		ENDFOR
+;	ENDFOR
+	
+;-------------------------------------------
+; Output Variable //////////////////////////
+;-------------------------------------------
+	;Pitch Angle Variable
+	oPitchAngle = MrVariable( pa_bins, $
+	                          NAME = pa_bin_vname )
+	oPitchAngle['CATDESC']    = 'Pitch angle bins.'
+	oPitchAngle['DELTA_PLUS'] = dPA
+	oPitchAngle['LABLAXIS']   = 'PA!C(deg)
+	oPitchAngle['LOG']        = 0
+	oPitchAngle['UNITS']      = 'deg'
+	oPitchAngle['VALIDMIN']   = 0.0
+	oPitchAngle['VALIDMAX']   = 180.0
+	
+	;Energy variable
+;	oEnergy = MrVariable(energies, NAME=e_vname, /NO_COPY)
+;	oEnergy['LOG']   = 1B
+;	oEnergy['TITLE'] = 'Energy!C(eV)'
+;	oEnergy['UNITS'] = 'keV'
+	
+	;Omni
+	oPAD = MrTimeSeries( oVar['TIMEVAR'], pad, $
+	                     /CACHE, $
+	                     NAME = pad_vname )
+	
+	;Attributes
+	oVar -> CopyAttrTo, oPAD, [ 'FILLVAL', 'FORMAT', 'LOG', 'SCALETYP', 'SCALEMAX', $
+	                            'SCALEMIN', 'SI_CONVERSION', 'UNITS', 'VALIDMIN', 'VALIDMAX']
+	oPAD['DEPEND_1']   = oPitchAngle
+	oPAD['NAN']        = 1B
+	oPAD['SCALE']      = 1B
+	oPAD['TITLE']      = 'PAD!C' + oVar['UNITS']
+	oPAD['PLOT_TITLE'] = 'FEEPS Pitch Angle Distribution'
 END
 
 
 ;+
-;    this procedure splits the last integral channel from the FEEPS spectra, 
-;    creating 2 new tplot variables:
-;    
-;       [original variable]_clean - spectra with the integral channel removed
-;       [original variable]_500keV_int - the integral channel that was removed
+;    Read the CSV files containing the sun masked sectors.
+;
+; :Returns:
+;    MASK:          out, required, type=hash
+;                   A mask indicating whether a sector is contaminated by sunlight
+;                       or not. Keys are 'sc-eye-sensor', where SC is the spacecraft ID,
+;                       EYE is either "top" or "bottom", and SENSOR is the sensor ID.
+;                       A value of 1 (0) indicates that a sensor is (not) contaminated
+;                       by sunlight.
 ;-
 FUNCTION MrMMS_FEEPS_Load_Data_Read_CSV
 	Compile_Opt idl2
 	On_Error, 2
 	
 	;File to read
-	path = File_DirName( File_Which('mrmms_feeps_load_data.pro') )
+	path = FilePath( '', $
+	                 ROOT_DIR     = File_DirName( File_Which('mrmms_feeps_load_data.pro') ), $
+	                 SUBDIRECTORY = 'sun_tables' )
+	
+	;Find the CSV file that is closest to (without going over) the data range
+	files  = File_Search(path, StrJoin(['MMS1', 'FEEPS', 'ContaminatedSectors', '*.csv'], '_'))
+	times  = StRegEx(files, '([0-9]{4})([0-9]{2})([0-9]{2})', /EXTRACT, /SUBEXP)
+	tt2000 = MrCDF_Epoch_Compute(Fix(times[1,*]), Fix(times[2,*]), Fix(times[3,*]))
+	t0     = (MrVar_GetTRange('TT2000'))[0]
+	iFile  = Value_Locate(tt2000, t0) > 0
 	
 	;Convert the structure to a hash
 	mask = hash()
@@ -599,17 +999,22 @@ FUNCTION MrMMS_FEEPS_Load_Data_Read_CSV
 	;Each spacecraft
 	FOR i = 0, 3 DO BEGIN
 		sc   = 'mms' + String(i+1, FORMAT='(i1)')
-		file = FilePath( StrJoin( [StrUpCase(sc), 'FEEPS', 'ContaminatedSectors', '20160709.csv'], '_' ), $
+		file = FilePath( StrJoin( [StrUpCase(sc), 'FEEPS', 'ContaminatedSectors', times[iFile]+'.csv'], '_' ), $
 		                 ROOT_DIR = path )
 	
 		;Read the file
 		data = Read_CSV(file)
 		
-		;Each Eye
-		FOR j = 0, 23 DO BEGIN
-			eye = j LE 11 ? 'top' : 'bottom'
+		;TOP
+		FOR j = 0, 11 DO BEGIN
 			iBad = Where(data.(j) EQ 1, nBad)
-			IF nBad GT 0 THEN mask[sc + '-' + eye + '-' + String(j+1, FORMAT='(i0)')] = iBad
+			IF nBad GT 0 THEN mask[sc + '-top-' + String(j+1, FORMAT='(i0)')] = iBad
+		ENDFOR
+		
+		;BOTTOM
+		FOR j = 0, 11 DO BEGIN
+			iBad = Where(data.(j+12) EQ 1, nBad)
+			IF nBad GT 0 THEN mask[sc + '-bottom-' + String(j+1, FORMAT='(i0)')] = iBad
 		ENDFOR
 	ENDFOR
 	
@@ -618,11 +1023,15 @@ END
 
 
 ;+
-;    this procedure splits the last integral channel from the FEEPS spectra, 
-;    creating 2 new tplot variables:
-;    
-;       [original variable]_clean - spectra with the integral channel removed
-;       [original variable]_500keV_int - the integral channel that was removed
+;    Remove data from sectors that have been contaminated by sunlight.
+;
+; :Params:
+;       THEVAR:     in, required, type=objref
+;                   A MrTimeSeries variable containing the sensor data.
+;       SUNSECTOR:  in, required, type=objref
+;                   A MrTimeSeries variable containing the sun sector data.
+;       MASK:       in, required, type=hash
+;                   A table of bad sectors.
 ;-
 PRO MrMMS_FEEPS_Load_Data_Remove_Sun, theVar, sunSector, mask
 	Compile_Opt idl2
@@ -653,8 +1062,6 @@ END
 ;                   Data telemetry rate of the data. Options are: { 'slow' | 'fast' | 'srvy' | 'brst' }
 ;
 ; :Keywords:
-;       FGM_INSTR:  in, optional, type=string, default='fgm'
-;                   FGM instrument to use. Options are: { 'afg' | 'dfg' | 'fgm' }
 ;       LEVEL:      in, optional, type=string, default='l2'
 ;                   Data quality level. Options are: {'l1a' | 'l1b' | 'ql' | 'l2pre' | 'l2'}
 ;       NO_LOAD:    in, optional, type=boolean, default=0
@@ -688,7 +1095,7 @@ VARNAMES=varnames
 	IF N_Elements(trange)    GT 0 THEN MrVar_SetTRange, trange
 	
 	;Also get the spin sector number to make the sun correction
-	varformat = [varformat, '*spinsectnum*']
+	varformat = [varformat, '*mask*', '*spinsectnum*', '*pitch_angle', '*channel_ids']
 
 ;-------------------------------------------
 ; Get Data /////////////////////////////////
@@ -706,7 +1113,11 @@ VARNAMES=varnames
 	;Get the sun-sector variable
 	iSun = Where( StrMatch(varnames, '*spinsectnum*'), nSun )
 	oSunSector = MrVar_Get(varnames[iSun])
-
+	
+	;Get the pitch angles
+	iPA = Where( StrMatch(varnames, '*pitch_angle'), nPA )
+	oPA = MrVar_Get(varnames[iPA])
+	
 ;-------------------------------------------
 ; Fix Data /////////////////////////////////
 ;-------------------------------------------
@@ -721,34 +1132,39 @@ VARNAMES=varnames
 		
 		;Extract the variable
 		oVar = MrVar_Get(varnames[i])
-
+		
 		;Energy table corrections
 		MrMMS_FEEPS_Load_Data_Fix_Energies, oVar
-	
+		
 		;Flat-field correction
 		;   - Only for ions
 		IF tf_ion THEN MrMMS_FEEPS_Load_Data_Flat_Field, oVar
 	
 		;Remove data from bad eyes
-		MrMMS_FEEPS_Load_Data_Bad_Eyes, oVar
-	
-		;Separate 500keV channel
-		;   - It integrates from 500keV and above
-		;   - Energy bin is disproportionate
-		o500keV = MrMMS_FEEPS_Load_Data_Integral_Channel(oVar)
-		varnames = [varnames, o500keV.name]
+;		MrMMS_FEEPS_Load_Data_Bad_Eyes, oVar
+		MrMMS_FEEPS_Load_Data_Bad_Sectors, oVar
 	
 		;Separate 500keV channel
 		;   - It integrates from 500keV and above
 		;   - Energy bin is disproportionate
 		MrMMS_FEEPS_Load_Data_Remove_Sun, oVar, oSunSector, mask
+		
+		;Separate 500keV channel
+		;   - It integrates from 500keV and above
+		;   - Energy bin is disproportionate
+		o500keV = MrMMS_FEEPS_Load_Data_Integral_Channel(oVar)
+		varnames = [varnames, o500keV.name]
 	ENDFOR
-
+	
 ;-------------------------------------------
 ; Omni-Directional Flux ////////////////////
 ;-------------------------------------------
 	dataset = ['count_rate', 'intensity']
-
+	
+	IF N_Elements(b_field) GT 0 THEN BEGIN
+		oPAD = MrMMS_FEEPS_Load_Data_PAD(NPA_BINS=nPA_Bins, ERANGE=erange)
+	ENDIF
+	
 	;Create the omin-directional flux
 	FOR i = 0, N_Elements(sc)      - 1 DO $
 	FOR j = 0, N_Elements(mode)    - 1 DO $
@@ -759,18 +1175,35 @@ VARNAMES=varnames
 		;Look for relevant data
 		vtest = StrJoin( [sc[i], instr, mode[j], level[k], optdesc[l], '*', dataset[m], 'sensorid', '*'], '_') + suffix
 		MrVar_Names, varnames, vtest
-		IF varnames[0] NE '' THEN oOmni = MrMMS_FEEPS_Load_Data_Omni(vtest)
+		IF varnames[0] NE '' THEN BEGIN
+			oOmni = MrMMS_FEEPS_Load_Data_Omni(vtest)
+			oPAD  = MrMMS_FEEPS_Load_Data_PAD(vtest, oPA)
+		ENDIF
 		
 		;Add name
-		If Obj_Valid(oOmni) THEN varnames = [varnames, oOmni.name]
+		IF Obj_Valid(oOmni) THEN varnames = [varnames, oOmni.name, oPAD.name]
 	ENDFOR
 
 ;-------------------------------------------
 ; Clean Up /////////////////////////////////
 ;-------------------------------------------
-	;Get the names of the individual sensors
-	MrVar_Names, names, '.*_(electron|ion)_(bottom|top)_(count_rate|intensity)_sensorid_.*'+suffix, /REGEX
+	;Delete data from the individual sensors
+	MrVar_Names, names, '.*_(electron|ion)_(bottom|top)_(count_rate|intensity)(_500keV)?_sensorid_.*'+suffix, /REGEX
+	MrVar_Delete, names
 	
-	;Delete them
+	;Delete spin sector
+	MrVar_Names, names, '*spinsectnum'
+	MrVar_Delete, names
+	
+	;Delete sector masks
+	MrVar_Names, names, '*sector_mask*'
+	MrVar_Delete, names
+	
+	;Delete sector masks
+	MrVar_Names, names, '*channel_ids'
+	MrVar_Delete, names
+	
+	;Delete sector masks
+	MrVar_Names, names, '*pitch_angle'
 	MrVar_Delete, names
 END
