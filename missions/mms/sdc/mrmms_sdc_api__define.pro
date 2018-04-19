@@ -72,6 +72,9 @@
 ;       2016/06/30  -   Written by Matthew Argall
 ;       2016/08/30  -   Bump "End_Date" field up to next day if time is not 00:00:00. - MRA
 ;       2016/11/19  -   Incorporate ancillary data products. - MRA
+;       2018/01/25  -   In ::SetProperty, RESET_PATH was overwriting input arguments. - MRA
+;       2018/03/08  -   When picking auto defaults for TEAM, PUBLIC in ::SetProperty, do
+;                           the same for SITE. - MRA
 ;-
 ;*****************************************************************************************
 ;+
@@ -2178,10 +2181,11 @@ _REF_EXTRA=extra
 	
 	;Web properties
 	IF N_Elements(extra) GT 0 THEN self.oWeb -> SetProperty, _STRICT_EXTRA=extra
-
+	
 ;---------------------------------------------------------------------
 ; Default Path & Query ///////////////////////////////////////////////
 ;---------------------------------------------------------------------
+	tf_reset_path = Keyword_Set(reset_path)
 	IF N_Elements(files) GT 0 && files[0] NE '' THEN reset_query = 1B
 	IF Keyword_Set(reset_query) THEN BEGIN
 		new_sc      = ''
@@ -2206,18 +2210,6 @@ _REF_EXTRA=extra
 		self.oWeb  -> GetProperty, DATE_START=new_tstart, DATE_END=new_tend
 	ENDELSE
 	
-	IF Keyword_Set(reset_path) THEN BEGIN
-		team      = 0B
-		public    = 1B
-		info      = 0B
-		names     = 0B
-		v_info    = 0B
-		download  = 1B
-		ancillary = 0B
-		hk        = 0B
-		science   = 1B
-	ENDIF
-	
 ;---------------------------------------------------------------------
 ; Dependencies ///////////////////////////////////////////////////////
 ;---------------------------------------------------------------------
@@ -2225,7 +2217,7 @@ _REF_EXTRA=extra
 	;Dependencies
 	;   - Set ANCILLARY and HK automatically
 	;   - If FILES is provided, other query parameters are ignored.
-	IF N_Elements(ancprod) GT 0 && ancprod[0] NE ''   THEN ancillary = 1B
+	IF N_Elements(ancprod) GT 0 && ancprod[0] NE '' THEN ancillary = 1B
 	
 	IF N_Elements(instr) GT 0 THEN BEGIN
 		IF instr[0] EQ 'hk' THEN BEGIN
@@ -2235,10 +2227,15 @@ _REF_EXTRA=extra
 		ENDIF ELSE IF Max(MrIsMember(['afg', 'dfg'], instr)) THEN BEGIN
 			team   = 1B
 			public = 0B
+			site   = ''
 		ENDIF
 	ENDIF
 	
-	IF N_Elements(level) GT 0 && Max(MrIsMember(['l1a', 'l1b', 'sitl', 'ql', 'l2pre'], level) ) then team = 1B
+	IF N_Elements(level) GT 0 && Max(MrIsMember(['l1a', 'l1b', 'sitl', 'ql', 'l2pre'], level) ) THEN BEGIN
+		team   = 1B
+		public = 0B
+		site   = ''
+	ENDIF
 
 ;---------------------------------------------------------------------
 ; Team or Public /////////////////////////////////////////////////////
@@ -2248,7 +2245,8 @@ _REF_EXTRA=extra
 		tf_site   = Keyword_set(site)
 		tf_team   = Keyword_Set(team)
 		tf_public = Keyword_Set(public)
-		IF tf_site && tf_team && tf_public THEN Message, 'SITE, TEAM, and PUBLIC are mutually exclusive.'
+		
+		IF tf_site + tf_team + tf_public GT 1 THEN Message, 'SITE, TEAM, and PUBLIC are mutually exclusive.'
 		
 		;Default to public site
 		CASE 1 OF
@@ -2261,6 +2259,8 @@ _REF_EXTRA=extra
 			tf_public: new_site = 'public'
 			ELSE:      new_site = 'public'
 		ENDCASE
+	ENDIF ELSE IF tf_reset_path THEN BEGIN
+		new_site = 'public'
 	ENDIF
 
 ;---------------------------------------------------------------------
@@ -2291,6 +2291,8 @@ _REF_EXTRA=extra
 			tf_download: new_info_type = 'download'
 			ELSE:        new_info_type = 'download'
 		ENDCASE
+	ENDIF ELSE IF tf_reset_path THEN BEGIN
+		new_info_type = 'download'
 	ENDIF
 
 ;---------------------------------------------------------------------
@@ -2318,6 +2320,8 @@ _REF_EXTRA=extra
 			tf_science: new_data_type = 'science'
 			ELSE:       new_data_type = 'science'
 		ENDCASE
+	ENDIF ELSE IF tf_reset_path THEN BEGIN
+		new_data_type = 'science'
 	ENDIF
 
 ;---------------------------------------------------------------------
