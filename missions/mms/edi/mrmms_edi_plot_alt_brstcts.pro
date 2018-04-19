@@ -87,7 +87,7 @@ TRANGE=trange
 	;Defaults
 	tf_load = ~keyword_set(no_load)
 	if n_elements(trange) gt 0 then MrVar_SetTRange, trange
-	if ~MrIsMember(optdesc, ['amb-alt-cc', 'amb-alt-oc', 'amb-alt-oom', 'amb-alt-oob']) $
+	if ~MrIsMember(['amb-alt-cc', 'amb-alt-oc', 'amb-alt-oom', 'amb-alt-oob'], optdesc) $
 		then message, 'Invalid value for OPTDESC.'
 	
 	;Variable type

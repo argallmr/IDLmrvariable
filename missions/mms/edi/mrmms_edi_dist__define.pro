@@ -973,8 +973,8 @@ LEVEL=level
 	On_Error, 2
 	
 	instr = 'edi'
-	IF n_elements(level)     EQ 0 THEN level     = 'l2'
-	IF n_elements(coord_sys) EQ 0 THEN coord_sys = 'gse'
+	IF N_Elements(level)     EQ 0 THEN level     = 'l2'
+	IF N_Elements(coord_sys) EQ 0 THEN coord_sys = 'gse'
 	IF N_Elements(optdesc)   EQ 0 THEN optdesc   = ['q0', 'amb', 'amb-pm2', 'amb-alt-cc', 'amb-alt-oc', 'amb-alt-oob', 'amb-alt-ooc']
 	
 	;Search for available files
@@ -992,7 +992,9 @@ LEVEL=level
 			optdesc = optdesc[iopt[0]]
 			MrPrintF, 'LogWarn', 'Multiple optional descriptors found. Choosing "' + optdesc + '".'
 		ENDELSE
-	ENDIF
+	ENDIF ELSE BEGIN
+		optdesc = optdesc[0]
+	ENDELSE
 	
 	;Load the data
 	MrMMS_Load_Data, sc, instr, mode, level, $

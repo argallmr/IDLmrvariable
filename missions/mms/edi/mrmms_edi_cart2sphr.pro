@@ -1,10 +1,10 @@
 ; docformat = 'rst'
 ;
 ; NAME:
-;       MrMMS_EDI_traj2cart
+;       MrMMS_EDI_cart2traj
 ;
 ;*****************************************************************************************
-;   Copyright (c) 2017, Matthew Argall                                                   ;
+;   Copyright (c) 2018, Matthew Argall                                                   ;
 ;   All rights reserved.                                                                 ;
 ;                                                                                        ;
 ;   Redistribution and use in source and binary forms, with or without modification,     ;
@@ -33,23 +33,25 @@
 ;       
 ; PURPOSE:
 ;+
-;   Load EDI Q0 or Data29 data from source l1a files. Counts are calibrated and
-;   trajectories are rotated into geostationary coordinate systems. This program
-;   requires access to the MMS team side of the SDC.
+;   Transform trajectory vectors from cartesian to spherical coordinates.
 ;
 ; :Categories:
 ;   MrVariable, MMS, EDI
 ;
 ; :Params:
-;       TRAJ:       in, required, type=int/string/objref
-;                   The index, name, or MrTimeSeries object of EDI incident trajectory
-;                       vectors.
+;       VEC:            in, required, type=int/string/objref
+;                       The index, name, or MrVectorTS object of EDI incident trajectory
+;                           vectors.
 ;
 ; :Keywords:
 ;       CACHE:          in, optional, type=boolean, default=0
 ;                       If set, the output will be added to the variable cache.
 ;       NAME:           in, optional, type=string, default='Cyclotron_Frequency'
 ;                       Name to be given to the output variable.
+;
+; :Returns:
+;       OTRAJ:          out, required, type=objref
+;                       Trajectory vectors output in unit spherical coordinates.
 ;
 ; :Author:
 ;   Matthew Argall::
@@ -61,34 +63,29 @@
 ;
 ; :History:
 ;   Modification History::
-;       2017/09/30  -   Written by Matthew Argall
+;       2018/03/08  -   Written by Matthew Argall
 ;-
-FUNCTION MrMMS_EDI_traj2cart, traj, $
+FUNCTION MrMMS_EDI_cart2sphr, vec, $
 CACHE=cache, $
 NAME=name
 	Compile_Opt idl2
 	On_Error, 2
 	
-	oTraj = MrVar_Get(traj)
+	oVec = MrVar_Get(vec)
 	
-	;Convert to radians
-	azimuth = oTraj['DATA',*,0] * !dpi / 180D
-	polar   = oTraj['DATA',*,1] * !dpi / 180D
-	
-	;Compute cartesian coordinates
-	x = Sin(polar) * Cos(azimuth)
-	y = Sin(polar) * Sin(azimuth)
-	z = Cos(polar)
+	;Convert to angles
+	polar   = ACos(oVec['DATA',*,2]) * 180D / !dpi
+	azimuth = ATan(oVec['DATA',*,1], oVec['DATA',*,0])
 	
 	;Create vector
-	oV = MrVectorTS( oTraj['TIMEVAR'], Float([ [x], [y], [z] ]), $
-	                 CACHE = cache, $
-	                 NAME  = name )
+	oTraj = MrTimeSeries( oVec['TIMEVAR'], Float([ [azimuth], [polar] ]), $
+	                      CACHE = cache, $
+	                      NAME  = name )
 	
 	;Attributes
-	oTraj -> CopyAttrTo, oV, ['CATDESC', 'FIELDNAM']
-	oV['AXIS_RANGE'] = [-1.0, 1.0]
-	oV['LABEL']      = ['X', 'Y', 'Z']
+	oTraj['AXIS_RANGE'] = [-180.0, 180.0]
+	oTraj['COLOR']      = ['Red', 'Blue']
+	oTraj['LABEL']      = ['$\phi$', '$\theta$']
 	
-	RETURN, oV
+	RETURN, oTraj
 END

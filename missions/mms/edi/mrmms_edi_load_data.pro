@@ -557,7 +557,7 @@ VARFORMAT=varformat
 			MrPrintF, 'LogWarn', '   ' + '[' + StrJoin(optdesc, ', ') + ']'
 		ENDIF
 	ENDIF
-
+	
 	;EDI
 	MrMMS_Load_Data, sc, instr, mode, level, $
 	                 OPTDESC   = optdesc, $
