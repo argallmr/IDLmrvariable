@@ -1,7 +1,7 @@
 ; docformat = 'rst'
 ;
 ; NAME:
-;       MrMMS_Plot_FPI_CalcMoms
+;       MrMMS_Plot_Entropy
 ;
 ;*****************************************************************************************
 ;   Copyright (c) 2017, Matthew Argall                                                   ;

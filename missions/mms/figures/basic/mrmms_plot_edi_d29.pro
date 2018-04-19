@@ -337,47 +337,53 @@ TRANGE=trange
 ;-------------------------------------------
 	;BMAG
 	oB = MrVar_Get(fgm_b_vname)
-	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level, optdesc[0]], ' ' ) )
+	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level, 'DATA29'], ' ' ) )
 	
 	;E FIELD
 	oE = MrVar_Get(e_vname)
 	oE['TITLE'] = 'E!C(mV/m)'
 	
 	;ANGULAR DIFFERENCE
-	oDAng['TITLE'] = '$\Delta$$\Theta$!C(deg)'
-	oDAng['UNITS'] = 'degrees'
+	oDAng['AXIS_RANGE']   = [0,180]
+	oDAng['TICKINTERVAL'] = 90
+	oDAng['TITLE']        = '$\Delta$$\Theta$!C(deg)'
+	oDAng['UNITS']        = 'degrees'
 	
 	;
 	; EFIELD - THETA & PHI
 	;
 	
 	;GDU2
-	oPhi_GD12['AXIS_RANGE'] = [-180,180]
-	oPhi_GD12['COLOR']      = 'Red'
-	oPhi_GD12['LABEL']      = 'GDU2'
-	oPhi_GD12['TITLE']      = 'Phi!C(deg)'
-	oPhi_GD12['UNITS']      = 'degrees'
+	oPhi_GD12['AXIS_RANGE']   = [-180,180]
+	oPhi_GD12['COLOR']        = 'Red'
+	oPhi_GD12['LABEL']        = 'GDU2'
+	oPhi_GD12['TICKINTERVAL'] = 90.0
+	oPhi_GD12['TITLE']        = 'Phi!C(deg)'
+	oPhi_GD12['UNITS']        = 'degrees'
 	
 	;GDU1
-	oPhi_GD21['AXIS_RANGE'] = [-180,180]
-	oPhi_GD21['COLOR']      = 'Blue'
-	oPhi_GD21['LABEL']      = 'GDU1'
-	oPhi_GD21['TITLE']      = 'Phi!C(deg)'
-	oPhi_GD21['UNITS']      = 'degrees'
+	oPhi_GD21['AXIS_RANGE']   = [-180,180]
+	oPhi_GD21['COLOR']        = 'Blue'
+	oPhi_GD21['LABEL']        = 'GDU1'
+	oPhi_GD21['TICKINTERVAL'] = 90.0
+	oPhi_GD21['TITLE']        = 'Phi!C(deg)'
+	oPhi_GD21['UNITS']        = 'degrees'
 	
 	;GDU2
-	oTheta_GD12['AXIS_RANGE'] = [0,180]
-	oTheta_GD12['COLOR']      = 'Red'
-	oTheta_GD12['LABEL']      = 'GDU2'
-	oTheta_GD12['TITLE']      = 'Theta!C(deg)'
-	oTheta_GD12['UNITS']      = 'degrees'
+	oTheta_GD12['AXIS_RANGE']   = [0,180]
+	oTheta_GD12['COLOR']        = 'Red'
+	oTheta_GD12['LABEL']        = 'GDU2'
+	oTheta_GD12['TICKINTERVAL'] = 90.0
+	oTheta_GD12['TITLE']        = 'Theta!C(deg)'
+	oTheta_GD12['UNITS']        = 'degrees'
 	
 	;GDU1
-	oTheta_GD21['AXIS_RANGE'] = [0,180]
-	oTheta_GD21['COLOR']      = 'Blue'
-	oTheta_GD21['LABEL']      = 'GDU1'
-	oTheta_GD21['TITLE']      = 'Theta!C(deg)'
-	oTheta_GD21['UNITS']      = 'degrees'
+	oTheta_GD21['AXIS_RANGE']   = [0,180]
+	oTheta_GD21['COLOR']        = 'Blue'
+	oTheta_GD21['LABEL']        = 'GDU1'
+	oTheta_GD21['TICKINTERVAL'] = 90.0
+	oTheta_GD21['TITLE']        = 'Theta!C(deg)'
+	oTheta_GD21['UNITS']        = 'degrees'
 	
 	;
 	; EFIELD - Quality

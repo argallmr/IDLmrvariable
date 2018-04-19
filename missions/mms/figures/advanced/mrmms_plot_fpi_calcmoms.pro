@@ -153,22 +153,10 @@ NO_LOAD=no_load
 		
 		;FPI
 		MrMMS_FPI_Load_Dist3D, sc, mode, species, $
+;		                       /APPLY_MODEL, $
 		                       COORD_SYS   = coord_sys, $
 		                       LEVEL       = level, $
 		                       ORIENTATION = orientation
-		
-		;Photoelectron model
-		IF species EQ 'e' THEN BEGIN
-			MrMMS_FPI_Load_Models, sc, mode, species, $
-			                       SUFFIX = '_model'
-		
-			;Create f_photo
-			ofPhoto = MrMMS_FPI_Dist_Photo( f_vname, dphi_vname, ph_scl_vname, ph_dphi_vname, $
-			                                ph_f0_vname, ph_e0_vname, ph_f1_vname, ph_e1_vname, $
-			                                parity_vname, $
-			                                /CACHE, $
-			                                NAME = fph_vname )
-		ENDIF
 		
 		;Load FPI Moments
 		MrMMS_FPI_Load_Data, sc, mode, $
@@ -185,26 +173,11 @@ NO_LOAD=no_load
 	ENDIF
 
 ;-------------------------------------------
-; Photo Electron Distribution //////////////
-;-------------------------------------------
-
-	;Subtract from the distribution function
-	ofDist = MrVar_Get(f_vname)
-	IF species EQ 'e' THEN BEGIN
-		ofPhoto = MrVar_Get(fph_vname)
-		ofcorr  = ofDist - ofPhoto > 0
-	ENDIF ELSE BEGIN
-		ofcorr = ofDist > 0
-	ENDELSE
-	
-	ofcorr -> ReplaceValue, 0, !Values.F_NaN
-	ofDist -> CopyAttrTo, ofcorr
-
-;-------------------------------------------
 ; Compute Moments //////////////////////////
 ;-------------------------------------------
 	;Distribution function
 	theSpecies = species EQ 'i' ? 'H' : species
+	ofcorr = MrVar_Get(f_vname)
 	oDist  = MrDist4D(ofcorr, VSC=scpot_vname, SPECIES=theSpecies)
 	oDist -> Moments, /CACHE, $
 	                  DENSITY     = oDensity, $

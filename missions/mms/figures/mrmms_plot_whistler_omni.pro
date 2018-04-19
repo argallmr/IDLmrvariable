@@ -90,7 +90,7 @@ TRANGE=trange
 	tf_load = ~keyword_set(no_load)
 	if n_elements(nfft)      eq 0 then nfft      = 1024
 	if n_elements(fgm_instr) eq 0 then fgm_instr = 'fgm'
-	if n_elements(Bmirror)   eq 0 then Bmirror   = 42                     ;nT
+	if n_elements(b_mirror)  eq 0 then b_mirror  = 42                     ;nT
 	if n_elements(f_wave)    eq 0 then f_wave    = 100                    ;Hz
 	if n_elements(energies)  eq 0 then energies  = [20, 100, 200, 500]    ;eV
 	if n_elements(species)   eq 0 then species   = 'e'
@@ -233,28 +233,16 @@ TRANGE=trange
 ;-------------------------------------------
 ; Mirror Angle /////////////////////////////
 ;-------------------------------------------
-
-	;Loss cone
-	nMirror = n_elements(Bmirror)
-	oB     = MrMMS_FGM_BField(BFIELD=bvec_vname)
+	oBmag = MrVar_Get(bmag_vname)
 	
-	;Mirror point
-	oAngLo = oB -> MirrorAngle(Bmirror[0], NAME=mir1_lo_vname, /CACHE)
-	oAngHi = 180.0 - oAngLo
-	oAngHi -> SetName, mir1_hi_vname
-	oAngHi -> Cache
+	;Mirror angle and its complement
+	anglo = ASin( Sqrt(oBmag['DATA'] / b_mirror) ) * 180.0/!pi
+	anghi = 180.0 - anglo
 	
-	;Mirror point 2
-	if nMirror eq 2 then begin
-		oAngLo = oB -> MirrorAngle(Bmirror[1], NAME=mir2_lo_vname, /CACHE)
-		oAngHi = 180.0 - oAngLo
-		oAngHi -> SetName, mir2_hi_vname
-		oAngHi -> Cache
-	endif
+	;Create time series variables
+	oAngLo = MrScalarTS(oBmag['TIMEVAR'], anglo, /CACHE, NAME=mir1_lo_vname)
+	oAngHi = MrScalarTS(oBmag['TIMEVAR'], anghi, /CACHE, NAME=mir1_hi_vname)
 	
-	;Cleanup
-	obj_destroy, oB
-
 ;-------------------------------------------
 ; Scattering ///////////////////////////////
 ;-------------------------------------------
@@ -327,7 +315,7 @@ TRANGE=trange
 	
 	;PAD
 	oPAD = MrVar_Get(pad_vname)
-	oPA  = MrVar_Get(oPAD['DEPEND_1'])
+	oPA  = oPAD['DEPEND_1']
 	oPAD['TITLE'] = 'EFlux!C' + oPAD['UNITS']
 	oPA['TITLE']  = 'PA!C(deg)'
 	
@@ -357,7 +345,7 @@ TRANGE=trange
 	
 	;ESpec
 	oEe = MrVar_Get(espec_vname)
-	oEn = MrVar_Get(oEe['DEPEND_1']
+	oEn = oEe['DEPEND_1']
 	oEn['TITLE'] = 'Energy!C(eV)'
 	
 	;B PSD
@@ -387,7 +375,7 @@ TRANGE=trange
 	win = MrVar_OPlotTS( espec_vname, eres_vname )
 	win = MrVar_OPlotTS( [scm_psd_vname, scm_psd_vname, scm_psd_vname, edp_psd_vname, edp_psd_vname, edp_psd_vname], $
 	                     [fce_vname,     fpe_vname,     flh_vname,     fce_vname,     fpe_vname,     fpe_vname] )
-	if nMirror eq 2 then win = MrVar_OPlotTS( [pad_vname, pad_vname], [mir2_lo_vname, mir2_hi_vname] )
+;	if nMirror eq 2 then win = MrVar_OPlotTS( [pad_vname, pad_vname], [mir2_lo_vname, mir2_hi_vname] )
 	
 	;Draw horizontal lines
 	trange = MrVar_GetTRange('SSM')

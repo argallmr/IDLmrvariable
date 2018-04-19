@@ -114,7 +114,7 @@ TRANGE=trange
 	;EDI
 	instr   = 'edi'
 	coords  = 'gse'
-	optdesc = ['amb', 'amb-pm2']
+	optdesc = ['amb', 'amb-pm2', 'amb-alt-cc', 'amb-alt-oc', 'amb-alt-ooc', 'amb-alt-oob']
 	
 	;FGM
 	fgm_instr  = mode EQ 'brst' ? 'fgm' : 'dfg'
@@ -129,15 +129,9 @@ TRANGE=trange
 
 	;Source names
 	;   - Different version of L2Pre use different naming conventions
-	IF fgm_level EQ 'l2' THEN BEGIN ;fgm_level EQ 'l2pre' ||
-		fgm_b_vname     = StrJoin( [sc, fgm_instr, 'b',    fgm_coords, fgm_mode, fgm_level], '_' )
-		fgm_bvec_vname  = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords, fgm_mode, fgm_level], '_' )
-		fgm_bmag_vname  = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords, fgm_mode, fgm_level], '_' )
-	ENDIF ELSE BEGIN
-		fgm_b_vname     = StrJoin( [sc, fgm_instr,        fgm_mode, fgm_level, fgm_coords], '_' )
-		fgm_bvec_vname  = StrJoin( [sc, fgm_instr, 'vec', fgm_mode, fgm_level, fgm_coords], '_' )
-		fgm_bmag_vname  = StrJoin( [sc, fgm_instr, 'mag', fgm_mode, fgm_level, fgm_coords], '_' )
-	ENDELSE
+	fgm_b_vname     = StrJoin( [sc, fgm_instr, 'b',    fgm_coords, fgm_mode, fgm_level], '_' )
+	fgm_bvec_vname  = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords, fgm_mode, fgm_level], '_' )
+	fgm_bmag_vname  = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords, fgm_mode, fgm_level], '_' )
 	e_vname       = StrJoin( [sc, edp_instr, 'dce',  edp_coords, edp_mode, level], '_' )
 	
 	channels      = ['1', '2', '3', '4']
@@ -168,8 +162,19 @@ TRANGE=trange
 		                     LEVEL     = fgm_level, $
 		                     VARFORMAT = fgm_b_vname
 		
-		IF fgm_level NE 'l2' && ~MrVar_IsCached(fgm_b_vname) $
-			THEN Message, 'FGM L2PRE variable name incorrect. Try swapping naming conventions.'
+		IF fgm_level NE 'l2' && ~MrVar_IsCached(fgm_b_vname) THEN BEGIN
+			fgm_b_vname     = StrJoin( [sc, fgm_instr,        fgm_mode, fgm_level, fgm_coords], '_' )
+			fgm_bvec_vname  = StrJoin( [sc, fgm_instr, 'vec', fgm_mode, fgm_level, fgm_coords], '_' )
+			fgm_bmag_vname  = StrJoin( [sc, fgm_instr, 'mag', fgm_mode, fgm_level, fgm_coords], '_' )
+			
+			MrMMS_FGM_Load_Data, sc, fgm_mode, $
+			                     INSTR     = fgm_instr, $
+			                     LEVEL     = fgm_level, $
+			                     VARFORMAT = fgm_b_vname
+			
+			IF ~MrVar_IsCached(fgm_b_vname) $
+				THEN Message, 'Unknown FGM variable naming convention.'
+		ENDIF
 
 		;EDP
 		MrMMS_Load_Data, sc, edp_instr, edp_mode, level, $
@@ -177,9 +182,10 @@ TRANGE=trange
 		                 VARFORMAT = e_vname
 
 		;EDI
-		oEDI = MrMMS_EDI_Dist(sc, mode, optdesc)
+		oEDI = MrMMS_EDI_Dist(sc, mode, optdesc, $
+		                      COORD_SYS=coords)
 	ENDIF
-	
+stop
 	;Determine which EDI file was loaded
 	fnames = MrMMS_Get_FileNames(sc, 'edi', mode, level, OPTDESC=optdesc)
 	MrMMS_Parse_Filename, fnames, OPTDESC=optdesc

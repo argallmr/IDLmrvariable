@@ -189,21 +189,25 @@ TRANGE=trange
 ; Attributes ///////////////////////////////
 ;-------------------------------------------
 	;B XYZ
+	oB['COLOR']      = ['Blue', 'Forest Green', 'Red']
 	oB['LABEL']      = 'B$\down' + ['X', 'Y', 'Z'] + '$'
 	oB['PLOT_TITLE'] = 'JVA Analysis'
 	oB['TITLE']      = 'B!C(nT)'
 	
 	;E XYZ
+	oE['COLOR']      = ['Blue', 'Forest Green', 'Red']
 	oE['LABEL']      = 'E$\down' + ['X', 'Y', 'Z'] + '$'
 	oE['PLOT_TITLE'] = 'JVA Analysis'
 	oE['TITLE']      = 'E!C(mV/m)'
 	
 	;B JVA
+	oB_jva['COLOR'] = ['Blue', 'Forest Green', 'Red']
 	oB_jva['LABEL'] = 'B$\down' + ['N', 'M', 'L'] + '$'
 	oB_jva['TITLE'] = 'B!C(nT)'
 	oB_jva['UNITS'] = 'nT'
 	
 	;E JVA
+	oE_jva['COLOR'] = ['Blue', 'Forest Green', 'Red']
 	oE_jva['LABEL'] = 'E$\down' + ['N', 'M', 'L'] + '$'
 	oE_jva['TITLE'] = 'E!C(mV/m)'
 	oE_jva['UNITS'] = 'mV/m'
@@ -251,7 +255,7 @@ TRANGE=trange
 ;-------------------------------------------
 	cgLoadCT, 13
 
-	oB_jva -> RemoveAttr, 'LABEL'
+	oB_jva -> RemoveAttr, ['COLOR', 'LABEL']
 	brange = [ Min(oB_jva['DATA', itb[0]:itb[1], *], MAX=bmax), bmax ]
 	
 	;BL-BN
@@ -284,7 +288,7 @@ TRANGE=trange
 ;-------------------------------------------
 ; E Hodogram ///////////////////////////////
 ;-------------------------------------------
-	oE_jva -> RemoveAttr, 'LABEL'
+	oE_jva -> RemoveAttr, ['COLOR', 'LABEL']
 	erange = [ Min(oE_jva['DATA', ite[0]:ite[1], *], MAX=emax), emax ]
 	
 	;EL-EN
@@ -319,32 +323,30 @@ TRANGE=trange
 ;-------------------------------------------
 	tr = MrVar_GetTRange('SSM')
 	tt = oTb[ 'DATA', [itb[0], itb[1]], 'SSM' ]
-	t0 = (tr[1] - tr[0] LT 60) ? tt[0] - Floor(tt[0]) : tt[0]
-	t1 = (tr[1] - tr[0] LT 60) ? tt[1] - Floor(tt[0]) : tt[1]
 
 	;
 	;Outline the JVA interval
 	;
 	
 	;B
-	ps1 = MrPlotS( [t0, t0], p1.yrange, $
+	ps1 = MrPlotS( tt[[0,0]], p1.yrange, $
 	               COLOR     = 'Blue', $
 	               NAME      = 'Line: B-JVA0', $
 	               TARGET    = p1, $
 	               LINESTYLE = 2 )
-	ps2 = MrPlotS( [t1, t1], p1.yrange, $
+	ps2 = MrPlotS( tt[[1,1]], p1.yrange, $
 	               COLOR     = 'Blue', $
 	               NAME      = 'Line: B-JVA1', $
 	               TARGET    = p1, $
 	               LINESTYLE = 2 )
 
 	;E
-	ps3 = MrPlotS( [t0, t0], p2.yrange, $
+	ps3 = MrPlotS( tt[[0,0]], p2.yrange, $
 	               COLOR     = 'Blue', $
 	               NAME      = 'Line: E-JVA0', $
 	               TARGET    = p2, $
 	               LINESTYLE = 2 )
-	ps4 = MrPlotS( [t1, t1], p2.yrange, $
+	ps4 = MrPlotS( tt[[1,1]], p2.yrange, $
 	               COLOR     = 'Blue', $
 	               NAME      = 'Line: E-JVA1', $
 	               TARGET    = p2, $

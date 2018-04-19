@@ -56,6 +56,13 @@
 ;                   Data quality level. Options are: {'l1a' | 'l1b' | 'ql' | 'l2pre' | 'l2'}
 ;       OPTDESC:    in, optional, type=string, default=''
 ;                   Optional filename descriptor.
+;       OUTPUT_DIR: in, optional, type=string, default=pwd
+;                   A directory in which to save the figure. If neither `OUTPUT_DIR`
+;                       nor `OUTPUT_EXT` are defined, no file is generated.
+;       OUTPUT_EXT: in, optional, type=string, default=pwd
+;                   File extensions for the output figure. Options include: 'eps', 'gif',
+;                       'jpg', 'ps', 'pdf', 'png', 'tiff'. If neither `OUTPUT_DIR` nor
+;                       `OUTPUT_EXT` are defined, no file is generated.
 ;       NO_LOAD:    in, optional, type=boolean, default=0
 ;                   If set, data will not be loaded from source CDF files.
 ;       TRANGE:     in, optional, type=string/strarr(2), default=MrVar_GetTRange()
@@ -78,6 +85,8 @@ FUNCTION MrMMS_Plot_DIS, sc, mode, $
 FGM_INSTR=fgm_instr, $
 LEVEL=level, $
 OPTDESC=optdesc, $
+OUTPUT_DIR=output_dir, $
+OUTPUT_EXT=output_ext, $
 NO_LOAD=no_load, $
 TRANGE=trange
 	Compile_Opt idl2
@@ -99,8 +108,9 @@ TRANGE=trange
 ; Variable Names ///////////////////////////
 ;-------------------------------------------
 	species = 'i'
-	instr   = 'd' + species + 's'
-	optdesc = instr + '-moms'
+	fpi_instr   = 'd' + species + 's'
+	fpi_optdesc = fpi_instr + '-moms'
+	fpi_mode    = mode EQ 'brst' ? mode : 'fast'
 	IF N_Elements(fgm_instr) EQ 0 THEN BEGIN
 		CASE level OF
 			'l2': fgm_instr = 'fgm'
@@ -120,11 +130,11 @@ TRANGE=trange
 	b_vname     = StrJoin( [sc, fgm_instr, 'b',     fgm_coords, fgm_mode, level], '_' )
 	bvec_vname  = StrJoin( [sc, fgm_instr, 'bvec',  fgm_coords, fgm_mode, level], '_' )
 	bmag_vname  = StrJoin( [sc, fgm_instr, 'bmag',  fgm_coords, fgm_mode, level], '_' )
-	espec_vname = StrJoin( [sc, instr,     'energyspectr', 'omni', mode], '_' )
-	n_vname     = StrJoin( [sc, instr,     'numberdensity', mode], '_' )
-	v_vname     = StrJoin( [sc, instr,     'bulkv', coords, mode], '_' )
-	tpara_vname = StrJoin( [sc, instr,     'temppara', mode], '_' )
-	tperp_vname = StrJoin( [sc, instr,     'tempperp', mode], '_' )
+	espec_vname = StrJoin( [sc, fpi_instr, 'energyspectr', 'omni', mode], '_' )
+	n_vname     = StrJoin( [sc, fpi_instr, 'numberdensity', fpi_mode], '_' )
+	v_vname     = StrJoin( [sc, fpi_instr, 'bulkv', coords, fpi_mode], '_' )
+	tpara_vname = StrJoin( [sc, fpi_instr, 'temppara', fpi_mode], '_' )
+	tperp_vname = StrJoin( [sc, fpi_instr, 'tempperp', fpi_mode], '_' )
 
 ;-------------------------------------------
 ; Get Data /////////////////////////////////
@@ -137,8 +147,8 @@ TRANGE=trange
 		                     VARFORMAT = b_vname
 
 		;DIS
-		MrMMS_FPI_Load_Data, sc, mode, $
-		                     OPTDESC   = optdesc, $
+		MrMMS_FPI_Load_Data, sc, fpi_mode, $
+		                     OPTDESC   = fpi_optdesc, $
 		                     VARFORMAT = [espec_vname, n_vname, v_vname, tpara_vname, tperp_vname]
 	ENDIF
 	
@@ -147,7 +157,7 @@ TRANGE=trange
 ;-------------------------------------------
 	;BMAG
 	oB = MrVar_Get(b_vname)
-	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level, optdesc], ' ' ) )
+	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level, fpi_optdesc], ' ' ) )
 
 	;N
 	oN = MrVar_Get(n_vname)
@@ -189,5 +199,26 @@ TRANGE=trange
 	win    -> SetProperty, OXMARGIN=[13, 14]
 	win    -> Refresh
 
+;-------------------------------------------
+; Save Figure //////////////////////////////
+;-------------------------------------------
+	IF N_Elements(output_dir) GT 0 || N_Elements(output_ext) GT 0 THEN BEGIN
+		;Defaults
+		IF N_Elements(output_dir) EQ 0 THEN BEGIN
+			CD, CURRENT=output_dir
+			MrPrintF, 'LogText', 'Saving file to: "' + output_dir + '".'
+		ENDIF
+		
+		;File name
+		fname   = StrJoin( [sc, fpi_instr, fpi_mode, level, fpi_optdesc], '_' )
+		fname   = FilePath( fname, ROOT_DIR=output_dir )
+		
+		;Save the figure
+		fout = MrVar_PlotTS_Save( win, fname, output_ext )
+	ENDIF
+
+;-------------------------------------------
+; Done! ////////////////////////////////////
+;-------------------------------------------
 	RETURN, win
 END

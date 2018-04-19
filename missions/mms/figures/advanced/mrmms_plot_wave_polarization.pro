@@ -83,8 +83,10 @@
 ;   Modification History::
 ;       2017/05/04  -   Written by Matthew Argall
 ;       2017/06/06  -   Apply window function to FFT. - MRA
+;       2018/04/18  -   Added the LEVEL keyword. - MRA
 ;-
 FUNCTION MrMMS_Plot_Wave_Polarization, sc, instr, mode, nfft, nshift, $
+LEVEL=level, $
 NDETREND=nDetrend, $
 NO_LOAD=no_load, $
 OUTPUT_DIR=output_dir, $
@@ -121,6 +123,7 @@ TRANGE=trange
 	;FGM parameters
 	IF N_Elements(fgm_instr) EQ 0 THEN fgm_instr = (instr NE 'edp' && instr NE 'scm') ? instr : 'fgm'
 	fgm_coords = (coords EQ 'dsl'  || coords EQ 'dbcs') ? 'dmpa' : coords
+	IF level EQ 'ql' THEN fgm_coords = 'dmpa'
 	fgm_mode   = (mode   EQ 'fast' || mode   EQ 'slow') ? 'srvy' : mode
 	
 	;EDP parameters
@@ -146,7 +149,8 @@ TRANGE=trange
 	IF scm_coords NE 'gse' THEN Message, 'SCM data is available only in GSE.'
 	
 	;FPI Parameters
-	fpi_mode = mode EQ 'brst' ? mode : 'fast'
+	fpi_mode    = mode EQ 'brst' ? mode : 'fast'
+	fpi_optdesc = level EQ 'ql' ? 'des' : 'des-moms'
 	
 	;Load the data
 	IF tf_load THEN BEGIN
@@ -171,27 +175,34 @@ TRANGE=trange
 		
 		;FPI
 		MrMMS_FPI_Load_Data, sc, fpi_mode, $
-		                     OPTDESC   = 'des-moms', $
+		                     LEVEL     = level, $
+		                     OPTDESC   = fpi_optdesc, $
 		                     VARFORMAT = '*numberdensity_'+fpi_mode
 		
 		;FGM
 		MrMMS_FGM_Load_Data, sc, fgm_mode, $
 		                     INSTR     = fgm_instr, $
 		                     LEVEL     = level, $
-		                     VARFORMAT = '*b_'+fgm_coords+'_'+fgm_mode+'*'
+		                     VARFORMAT = ['*'+fgm_mode+'_'+fgm_coords,'*b_'+fgm_coords+'_'+fgm_mode+'*']
 	ENDIF
-
+	
 ;-------------------------------------------
 ; Variable Names ///////////////////////////
 ;-------------------------------------------
 	;Source names
-	b_vname    = StrJoin( [sc, fgm_instr, 'b',    fgm_coords,              mode, level], '_' )
-	bmag_vname = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords,              mode, level], '_' )
-	bvec_vname = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords,              mode, level], '_' )
-	fgm_vname  = StrJoin( [sc, instr,     'bvec', fgm_coords,              mode, level], '_' )
+	IF level EQ 'ql' THEN BEGIN
+		b_vname    = StrJoin( [sc, fgm_instr,        mode, fgm_coords], '_' )
+		bvec_vname = StrJoin( [sc, fgm_instr, 'vec', mode, fgm_coords], '_' )
+		bmag_vname = StrJoin( [sc, fgm_instr, 'mag', mode, fgm_coords], '_' )
+	ENDIF ELSE BEGIN
+		b_vname    = StrJoin( [sc, fgm_instr, 'b',    fgm_coords,              mode, level], '_' )
+		bmag_vname = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords,              mode, level], '_' )
+		bvec_vname = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords,              mode, level], '_' )
+	ENDELSE
+	fgm_vname  = bvec_vname
 	scm_vname  = StrJoin( [sc, instr,     'acb',  scm_coords, scm_optdesc, mode, level], '_' )
-	edp_vname  = StrJoin( [sc, instr,     'dce',  edp_coords,              mode, level], '_' )
-	ne_vname   = StrJoin( [sc, 'des',     'numberdensity',                 mode       ], '_' )
+	edp_vname  = StrJoin( [sc, instr,     'dce',  edp_coords,              edp_mode, level], '_' )
+	ne_vname   = StrJoin( [sc, 'des',     'numberdensity',                 fpi_mode       ], '_' )
 	
 	CASE instr OF
 		'edp': vin_vname = edp_vname

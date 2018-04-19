@@ -84,7 +84,15 @@
 ;       2017/05/04  -   Written by Matthew Argall
 ;       2017/05/15  -   AFG, DFG, and FGM may be used. Added MAXIMUM keyword. - MRA
 ;-
-FUNCTION MrMMS_Plot_MVA, var, trange, ttype
+FUNCTION MrMMS_Plot_MVA, sc, mode, t_mva, $
+COORDS=coords, $
+FGM_INSTR=fgm_instr, $
+LEVEL=level, $
+MAXIMUM=maximum, $
+NO_LOAD=no_load, $
+OUTPUT_DIR=output_dir, $
+OUTPUT_EXT=output_ext, $
+TRANGE=trange
 	Compile_Opt idl2
 	
 	Catch, the_error
@@ -95,35 +103,118 @@ FUNCTION MrMMS_Plot_MVA, var, trange, ttype
 		RETURN, !Null
 	ENDIF
 	
-	oVar = MrVar_Get(var)
-	IF ~Obj_IsA(oVar, 'MrVectorTS') THEN Message, 'VAR must be a MrVectorTS object.'
+	tf_load    = ~Keyword_Set(no_load)
+	tf_maximum = Keyword_Set(maximum)
+	IF N_Elements(coords)    EQ 0 THEN coords    = 'gse'
+	IF N_Elements(fgm_instr) EQ 0 THEN fgm_instr = 'fgm'
+	IF N_Elements(level)     EQ 0 THEN level     = 'l2'
+	IF N_Elements(trange)    GT 0 THEN MrVar_SetTRange, trange
+	IF N_Elements(t_mva)     EQ 0 THEN t_mva     = MrVar_GetTRange()
 	
-	nPts = oVar -> GetNPts()
-	IF N_Elements(trange) GT 0 THEN BEGIN
-		IF N_Elements(trange) NE 2 THEN Message, 'TRANGE must have 2 elements.'
-		it = oVar -> Value_Locate(var, trange, ttype)
-		IF it[1] EQ -1 || it[0] EQ nPts-1 THEN Message, 'No data in time interval.'
-		it = it > 0
+;-------------------------------------------
+; Data Parameters //////////////////////////
+;-------------------------------------------
+	;FGM parameters
+	fgm_coords = (coords EQ 'dsl'  || coords EQ 'dbcs') ? 'dmpa' : coords
+	fgm_mode   = (mode   EQ 'fast' || mode   EQ 'slow') ? 'srvy' : mode
+	
+	;EDP parameters
+	edp_coords = (coords EQ 'dmpa' || coords EQ 'dbcs') ? 'dsl'  : coords
+	IF mode EQ 'srvy' THEN BEGIN
+		MrPrintF, 'LogWarn', 'EDP does not have SRVY data. Using FAST.'
+		edp_mode = 'fast'
+	ENDIF ELSE BEGIN
+		edp_mode = mode
+	ENDELSE
+	
+;-------------------------------------------
+; Variable Names ///////////////////////////
+;-------------------------------------------
+	;Source names
+	b_vname    = StrJoin( [sc, fgm_instr, 'b',    fgm_coords, fgm_mode, level], '_' )
+	bvec_vname = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords, fgm_mode, level], '_' )
+	bmag_vname = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords, fgm_mode, level], '_' )
+	e_vname    = StrJoin( [sc, 'edp',     'dce',  edp_coords, edp_mode, level], '_' )
+	
+	;output names
+	b_mva_vname = StrJoin( [sc, fgm_instr, 'b',    'mva', fgm_mode, level], '_' )
+	e_mva_vname = StrJoin( [sc, 'edp',     'dce',  'mva', edp_mode, level], '_' )
+	
+	IF tf_maximum THEN BEGIN
+		param     = 'E'
+		varname   = e_vname
+		mva_vname = e_mva_vname
+	ENDIF ELSE BEGIN
+		param     = 'B'
+		varname   = bvec_vname
+		mva_vname = b_mva_vname
+	ENDELSE
+	
+;-------------------------------------------
+; Load Data ////////////////////////////////
+;-------------------------------------------
+	IF tf_load THEN BEGIN
+		;EDP E-Field
+		IF tf_maximum THEN BEGIN
+			MrMMS_Load_Data, sc, 'edp', edp_mode, level, $
+			                 OPTDESC   = 'dce', $
+			                 VARFORMAT = '*_dce_'+edp_coords+'_*'
+		
+		;FGM
+		ENDIF ELSE BEGIN
+			MrMMS_FGM_Load_Data, sc, fgm_mode, $
+			                     INSTR     = fgm_instr, $
+			                     LEVEL     = level, $
+			                     VARFORMAT = '*b_'+fgm_coords+'_'+fgm_mode+'*'
+		ENDELSE
 	ENDIF
 	
 ;-------------------------------------------
-; Plot Data ////////////////////////////////
+; MVA //////////////////////////////////////
+;-------------------------------------------
+
+	;Grab the data
+	oVec = MrVar_Get(varname)
+	oVec['PLOT_TITLE'] = 'Minimum Variance Analysis'
+	
+	;Find time interval
+	oT = oVec['TIMEVAR']
+	it = oT -> Value_Locate(t_mva) > 0
+	
+	;Minimum variance
+	oEigVec = MrVar_MVA( oVec[it[0]:it[1], *], $
+	                     EIGENVALUES = oEigVal, $
+	                     MAXIMUM     = tf_maximum )
+	
+	;Rotate field MVA coordiantes
+	;   - The rotation returns a MrVariable. Convert it to a MrVectorTS.
+	oVec_mva  = oEigVec ## oVec
+	oVec_mva = MrVectorTS( oVec['TIMEVAR'], oVec_mva, $
+	                       /CACHE, $
+	                       NAME = name )
+	oVec_mva['COLOR'] = ['Blue', 'Forest Green', 'Red']
+	oVec_mva['LABEL'] = param + '$\down' + ['N', 'M', 'L'] + '$'
+	oVec_mva['TITLE'] = param + '!C(' + (param EQ 'B' ? 'nT' : 'mV/m') + ')'
+	
+;-------------------------------------------
+; Plot Time Series /////////////////////////
 ;-------------------------------------------
 	cgLoadCT, 13
 	
-	win = MrWindow( LAYOUT   = [1,5], $
+	win = MrWindow( LAYOUT   = [1,2], $
 	                OXMARGIN = [10,6], $
+	                OYMARGIN = [20,3], $
 	                XGAP     = 0.0, $
 	                XSIZE    = 740, $
 	                YGAP     = 0.5, $
-	                YSIZE    = 775, $
+	                YSIZE    = 700, $
 	                REFRESH  = 0 )
 	
-	layout = MrLayout( [3,5], $
+	layout = MrLayout( [3,1], $
 	                   ASPECT   = 1.0, $
 	                   OXMARGIN = [10,6], $
-	                   OYMARGIN = [4,8], $
-	                   XGAP     = 0.0, $
+	                   OYMARGIN = [4,25], $
+	                   XGAP     = 15, $
 	                   YGAP     = 0.5 )
 	
 	;XYZ
@@ -131,10 +222,23 @@ FUNCTION MrMMS_Plot_MVA, var, trange, ttype
 	                 /CURRENT, $
 	                 LAYOUT = [1,1] )
 	
+	;LMN
+	p2 = MrVar_Plot( oVec_mva, $
+	                 /CURRENT, $
+	                 LAYOUT = [1,2] )
+	
+;-------------------------------------------
+; Plot Hodograms ///////////////////////////
+;-------------------------------------------
+	oVec_mva -> RemoveAttr, ['COLOR', 'LABEL']
+	xyrange   = [oVec_mva.min, oVec_mva.max]
+	
 	;BL-BN
 	p3 = MrVar_Plot( oVec_mva[it[0]:it[1], 0], oVec_mva[it[0]:it[1], 2], $
 	                 /CURRENT, $
-	                 POSITION = layout[*,6] )
+	                 POSITION = layout[*,0], $
+	                 XRANGE   = xyrange, $
+	                 YRANGE   = xyrange )
 	x3a = MrPlotS( oVec_mva['DATA', it[0]:it[1], 0], oVec_mva['DATA', it[0]:it[1], 2], $
 	               COLOR  = BytScl(oT['DATA', it[0]:it[1], 'SSM']), $
 	               PSYM   = 3, $
@@ -143,7 +247,9 @@ FUNCTION MrMMS_Plot_MVA, var, trange, ttype
 	;BL-BM
 	p4 = MrVar_Plot( oVec_mva[it[0]:it[1], 1], oVec_mva[it[0]:it[1], 2], $
 	                 /CURRENT, $
-	                 POSITION = layout[*,7] )
+	                 POSITION = layout[*,1], $
+	                 XRANGE   = xyrange, $
+	                 YRANGE   = xyrange )
 	x4 = MrPlotS( oVec_mva['DATA', it[0]:it[1], 1], oVec_mva['DATA', it[0]:it[1], 2], $
 	               COLOR  = BytScl(oT['DATA', it[0]:it[1], 'SSM']), $
 	               PSYM   = 3, $
@@ -152,7 +258,9 @@ FUNCTION MrMMS_Plot_MVA, var, trange, ttype
 	;BM-BN
 	p5 = MrVar_Plot( oVec_mva[it[0]:it[1], 0], oVec_mva[it[0]:it[1], 1], $
 	                 /CURRENT, $
-	                 POSITION = layout[*,8] )
+	                 POSITION = layout[*,2], $
+	                 XRANGE   = xyrange, $
+	                 YRANGE   = xyrange )
 	x5 = MrPlotS( oVec_mva['DATA', it[0]:it[1], 0], oVec_mva['DATA', it[0]:it[1], 1], $
 	               COLOR  = BytScl(oT['DATA', it[0]:it[1], 'SSM']), $
 	               PSYM   = 3, $
@@ -162,16 +270,14 @@ FUNCTION MrMMS_Plot_MVA, var, trange, ttype
 ; Annotate /////////////////////////////////
 ;-------------------------------------------
 	tt = oT[ 'DATA', [it[0], it[1]], 'SSM' ]
-	t0 = tt[0] - Floor(tt[0])
-	t1 = tt[1] - Floor(tt[0])
 
 	;Outline the MVA interval
-	ps1 = MrPlotS( [t0, t0], p1.yrange, $
+	ps1 = MrPlotS( tt[[0,0]], p1.yrange, $
 	               COLOR     = 'Blue', $
 	               NAME      = 'Line: MVA0', $
 	               TARGET    = p1, $
 	               LINESTYLE = 2 )
-	ps2 = MrPlotS( [t1, t1], p1.yrange, $
+	ps2 = MrPlotS( tt[[1,1]], p1.yrange, $
 	               COLOR     = 'Blue', $
 	               NAME      = 'Line: MVA1', $
 	               TARGET    = p1, $
@@ -186,13 +292,13 @@ FUNCTION MrMMS_Plot_MVA, var, trange, ttype
 	eigval  = String( oEigVal['DATA'], FORMAT='(f0.3)' )
 	seigval = '\lambda = [' + StrJoin( eigval, ', ' ) + ']'
 	
-	sB     = 'B = [' + StrJoin( String(b_avg, FORMAT='(f0.2)'), ', ' ) + ']'
-	sTheta = '\theta_{k} = ' + String(theta, FORMAT='(f0.2)')
+;	sB     = 'B = [' + StrJoin( String(b_avg, FORMAT='(f0.2)'), ', ' ) + ']'
+;	sTheta = '\theta_{k} = ' + String(theta, FORMAT='(f0.2)')
 	
-	txt1 = MrText( 0.50, 0.20, seigval, ALIGNMENT=0.5, NAME='Txt: Eigenvalues',  /NORMAL )
-	txt2 = MrText( 0.50, 0.15, seigvec, ALIGNMENT=0.5, NAME='Txt: Eigenvectors', /NORMAL )
-	txt3 = MrText( 0.50, 0.25, sB,      ALIGNMENT=0.5, NAME='Txt: B avg', /NORMAL )
-	txt3 = MrText( 0.50, 0.05, stheta,  ALIGNMENT=0.5, NAME='Txt: ThetaK', /NORMAL )
+	txt1 = MrText( 0.50, 0.14, seigval, ALIGNMENT=0.5, NAME='Txt: Eigenvalues',  /NORMAL )
+	txt2 = MrText( 0.50, 0.11, seigvec, ALIGNMENT=0.5, NAME='Txt: Eigenvectors', /NORMAL )
+;	txt3 = MrText( 0.50, 0.25, sB,      ALIGNMENT=0.5, NAME='Txt: B avg', /NORMAL )
+;	txt3 = MrText( 0.50, 0.05, stheta,  ALIGNMENT=0.5, NAME='Txt: ThetaK', /NORMAL )
 
 ;-------------------------------------------
 ; Prettify /////////////////////////////////
@@ -206,6 +312,40 @@ FUNCTION MrMMS_Plot_MVA, var, trange, ttype
 	win[0] -> SetLayout, [1,1]
 ;	win    -> TrimLayout
 	win -> SetProperty, OXMARGIN=[10,6]
+
+;-------------------------------------------
+; Save /////////////////////////////////////
+;-------------------------------------------
+	IF N_Elements(output_ext) GT 0 || N_Elements(output_dir) GT 0 THEN BEGIN
+		IF N_Elements(output_ext) EQ 0 THEN output_ext = 'png'
+		IF N_Elements(output_dir) EQ 0 THEN output_dir = File_Search('~', /TEST_DIRECTORY)
+		
+		;Parse analysis time
+		t0 = StrJoin( StrSplit(t_mva[0], '-T:', /EXTRACT) )
+		t1 = StrJoin( StrSplit(t_mva[1], '-T:', /EXTRACT) )
+		date0 = StrMid(t0, 0, 8)
+		date1 = StrMid(t1, 0, 8)
+		time0 = StrMid(t0, 8, 6) + ( StrLen(t0) LE 14 ? '' : 'p' + StrMid(t0, 15) )
+		time1 = StrMid(t1, 8, 6) + ( StrLen(t1) LE 14 ? '' : 'p' + StrMid(t1, 15) )
+		
+		;Time stamp for file
+		IF date0 NE date1 $
+			THEN ftime = StrJoin([date0, time0, date1, time1], '_') $
+			ELSE ftime = StrJoin([date0, time0, time1], '_')
+			
+		;File name
+		sinstr = tf_maximum ? 'edp' : fgm_instr
+		fname  = StrJoin([sc, sinstr, mode, level, 'mva', ftime], '_')
+		fname  = FilePath( fname + '.' + output_ext, $
+		                   ROOT_DIR = output_dir )
+
+		;Save
+		FOR i = 0, N_Elements(fname) - 1 DO win -> Save, fname[i]
+	ENDIF
+
+;-------------------------------------------
+; Done! ////////////////////////////////////
+;-------------------------------------------
 	win -> refresh
 	return, win
 end

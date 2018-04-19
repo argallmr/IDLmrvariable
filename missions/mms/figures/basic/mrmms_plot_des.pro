@@ -247,7 +247,7 @@ TRANGE=trange
 		ENDIF
 		
 		;File name
-		fname   = StrJoin( [sc, fpi_instr, fpi_mode, level], '_' )
+		fname   = StrJoin( [sc, fpi_instr, fpi_mode, level, fpi_optdesc], '_' )
 		fname   = FilePath( fname, ROOT_DIR=output_dir )
 		
 		;Save the figure

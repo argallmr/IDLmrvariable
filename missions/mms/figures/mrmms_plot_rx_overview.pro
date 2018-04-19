@@ -51,6 +51,15 @@
 ;                   Data rate mode. Options are {'srvy' | 'brst'}
 ;
 ; :Keywords:
+;       NO_LOAD:    in, optional, type=boolean, default=0
+;                   If set, data will not be loaded from source CDF files.
+;       OUTPUT_DIR: in, optional, type=string, default=pwd
+;                   A directory in which to save the figure. If neither `OUTPUT_DIR`
+;                       nor `OUTPUT_EXT` are defined, no file is generated.
+;       OUTPUT_EXT: in, optional, type=string, default=pwd
+;                   File extensions for the output figure. Options include: 'eps', 'gif',
+;                       'jpg', 'ps', 'pdf', 'png', 'tiff'. If neither `OUTPUT_DIR` nor
+;                       `OUTPUT_EXT` are defined, no file is generated.
 ;       TRANGE:     in, optional, type=string/strarr(2), default=MrVar_GetTRange()
 ;                   The start and end times of the data interval to be plotted, formatted
 ;                       as 'YYYY-MM-DDThh:mm:ss'
@@ -69,6 +78,8 @@
 ;-
 function MrMMS_Plot_Rx_Overview, sc, mode, $
 NO_LOAD=no_load, $
+OUTPUT_DIR=output_dir, $
+OUTPUT_EXT=output_ext, $
 TRANGE=trange
 	compile_opt idl2
 	
@@ -172,15 +183,28 @@ TRANGE=trange
 	oB['LABEL'] = ['Bx', 'By', 'Bz', '|B|']
 	oB['PLOT_TITLE'] = title
 	
+	;e- Energy Spectrogram
+	oEe = MrVar_Get(Ee_vname)
+	oEnergy = oEe['DEPEND_1']
+	oEnergy['TITLE'] = 'E e-!C(eV)'
+	
+	;Ion Energy Spectrogram
+	oEi = MrVar_Get(Ei_vname)
+	oEnergy = oEI['DEPEND_1']
+	oEnergy['TITLE'] = 'E ion!C(eV)'
+	
 	;NI
-	ni = MrVar_Get(ni_vname)
-	ni['COLOR'] = 'Blue'
-	ni['LABEL'] = 'ni'
-	ni['TITLE'] = 'N!Ccm$\up-3$'
+	ni     = MrVar_Get(ni_vname)
+	nrange = [ Min([ni.min, n_e.min]), Max([ni.max, n_e.max]) ]
+	ni['AXIS_RANGE'] = nrange
+	ni['COLOR']      = 'Blue'
+	ni['LABEL']      = 'ni'
+	ni['TITLE']      = 'N!Ccm$\up-3$'
 	
 	;NE
-	n_e['COLOR'] = 'Red'
-	n_e['LABEL'] = 'ne'
+	n_e['AXIS_RANGE'] = nrange
+	n_e['COLOR']      = 'Red'
+	n_e['LABEL']      = 'ne'
 	
 	;VI
 	vi['TITLE'] = 'Vi!C(km/s)'
@@ -191,6 +215,7 @@ TRANGE=trange
 	ve['TITLE'] = 'Ve!C(km/s)'
 	
 	;J
+	j['COLOR'] = ['Blue', 'Forest Green', 'Red']
 	j['LABEL'] = ['Jx', 'Jy', 'Jz']
 	j['TITLE'] = 'J!C$\mu$A/m$\up2$'
 	
@@ -227,12 +252,14 @@ TRANGE=trange
 ;-------------------------------------------
 ; Plot Data ////////////////////////////////
 ;-------------------------------------------
+	tf_save = N_Elements(output_dir) GT 0 || N_Elements(output_ext) GT 0
 	
 	;Plot
 	win = MrVar_PlotTS( [B_vname, Ee_vname, Ei_vname, ni_vname, vi_vname, ve_vname, j_vname, ti_para_vname, te_para_vname, E_vname], $
-	                    XSIZE = 800, $
-	                    YSIZE = 800)
-	win -> Refresh, /DISABLE
+;	                    BUFFER = tf_save, $
+	                    /NO_REFRESH, $
+	                    XSIZE  = 800, $
+	                    YSIZE  = 800)
 	
 	;Overplot
 	win = MrVar_OPlotTS( [ni_vname, ti_para_vname, te_para_vname], $
@@ -243,5 +270,29 @@ TRANGE=trange
 	win    -> SetProperty, OXMARGIN=[12,10]
 
 	win -> Refresh
+
+;-------------------------------------------
+; Save Figure //////////////////////////////
+;-------------------------------------------
+	IF tf_save THEN BEGIN
+		;Defaults
+		IF N_Elements(output_dir) EQ 0 THEN BEGIN
+			CD, CURRENT=output_dir
+		ENDIF ELSE IF ~File_Test(output_dir, /DIRECTORY) THEN BEGIN
+			MrPrintF, 'LogText', 'Creating directory: "' + output_dir + '".'
+			File_MKDir, output_dir
+		ENDIF
+		
+		;File name
+		fname = StrJoin( [sc, 'fpi', mode, level, 'rx-overview'], '_' )
+		fname = FilePath( fname, ROOT_DIR=output_dir )
+		
+		;Save the figure
+		fout = MrVar_PlotTS_Save( win, fname, output_ext )
+	ENDIF
+
+;-------------------------------------------
+; Finished! ////////////////////////////////
+;-------------------------------------------
 	return, win
 end

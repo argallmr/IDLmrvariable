@@ -119,7 +119,7 @@ VRANGE=vrange
 		IF species EQ 'e' THEN BEGIN
 			vrange = tf_tail ? [-4e4,  4e4] : [-1.5e4,  1.5e4]
 		ENDIF ELSE BEGIN
-			vrange = !Null
+			vrange = tf_tail ? [1e1,3e3] : [-1.5e4,  1.5e4]
 		ENDELSE
 	ENDIF
 	
@@ -127,7 +127,7 @@ VRANGE=vrange
 		IF species EQ 'e' THEN BEGIN
 			frange = tf_tail ? [1e-32,1e-29] : [1e-30, 1e-25]
 		ENDIF ELSE BEGIN
-			frange = !Null
+			frange = tf_tail ? [1e-29,1e-20] : [1e-30, 1e-25]
 		ENDELSE
 	ENDIF
 	
@@ -427,10 +427,11 @@ VRANGE=vrange
 	oV['AXIS_RANGE']      = vrange
 	
 	;P1P2
+	oP1P2_1D['AXIS_RANGE'] = frange
 	oP1P2_1D['LABEL'] = ['Perp1', 'Perp2']
 	
 	;PPA
-	oPPA_1D['AXIS_RANGE'] = [1e-32, 1e-25]
+	oPPA_1D['AXIS_RANGE'] = frange
 	oPPA_1D['TITLE']      = 'PSD!C(' + oPPA_1D['UNITS'] + ')'
 	
 	;E-PHI

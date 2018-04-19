@@ -287,7 +287,7 @@ OUTPUT_EXT=output_ext
 ;-------------------------------------------
 	;Distribution function
 	species = 'e'
-	oDist   = MrDist4D(f_des_vname, VSC=scpot_vname, SPECIES=species)
+	oDist   = MrDist4D_v1(f_des_vname, VSC=scpot_vname, SPECIES=species)
 	oDist  -> Moments, /CACHE, $
 	                   DENSITY     = oN_des, $
 	                   ENTROPY     = oS_des, $
@@ -310,7 +310,7 @@ OUTPUT_EXT=output_ext
 	;Distribution function
 	species = 'H'
 	ofDist  = MrVar_Get(f_dis_vname)
-	oDist   = MrDist4D(ofDist, VSC=scpot_vname, SPECIES=species)
+	oDist   = MrDist4D_v1(ofDist, VSC=scpot_vname, SPECIES=species)
 	oDist  -> Moments, /CACHE, $
 	                   DENSITY     = oN_dis, $
 	                   ENTROPY     = oS_dis, $
@@ -781,22 +781,8 @@ OUTPUT_EXT=output_ext
 		ENDIF
 		
 		;Save the figure
-		fname = StrJoin([sc, instr, mode, level, 'entropy'], '_')
-		fout = MrVar_PlotTS_Save( win, fname, output_ext )
-	ENDIF
-
-;-------------------------------------------
-; Save Figure //////////////////////////////
-;-------------------------------------------
-	IF N_Elements(output_dir) GT 0 || N_Elements(output_ext) GT 0 THEN BEGIN
-		;Defaults
-		IF N_Elements(output_dir) EQ 0 THEN BEGIN
-			CD, CURRENT=output_dir
-			MrPrintF, 'LogText', 'Saving file to: "' + output_dir + '".'
-		ENDIF
-		
-		;File name
-		fname  = StrJoin( [sc, 'fpi', mode, level, 'entropy', ftime], '_' )
+		fname = StrJoin([sc, 'fpi', mode, level, 'entropy'], '_')
+		fname = FilePath(fname, ROOT_DIR=output_dir)
 		fout = MrVar_PlotTS_Save( win, fname, output_ext )
 	ENDIF
 	
