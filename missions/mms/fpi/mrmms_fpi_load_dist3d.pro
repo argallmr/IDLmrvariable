@@ -508,14 +508,14 @@ VARNAMES=varnames
 	                 OPTDESC   = 'd' + species + 's-dist', $
 	                 SUFFIX    = suffix, $
 	                 TEAM_SITE = team_site, $
-	                 VARFORMAT = varformat, $
-	                 VARNAMES  = varnames
+	                 VARFORMAT = varformat
 	
 	IF tf_rager THEN !MrMMS -> SetProperty, OFFLINE=offline, DROPBOX_ROOT=dropbox_root
 	
 	;Associate variable attributes with DEPEND_[0-3]
 	dist_vname = sc + '_d' + species + 's_dist_' + mode
 	MrMMS_FPI_Load_Dist3D_Meta, dist_vname
+	varnames = dist_vname
 
 ;-----------------------------------------------------
 ; Correct for Internal Photoelectrons \\\\\\\\\\\\\\\\
