@@ -75,6 +75,7 @@
 ;       2018/01/25  -   In ::SetProperty, RESET_PATH was overwriting input arguments. - MRA
 ;       2018/03/08  -   When picking auto defaults for TEAM, PUBLIC in ::SetProperty, do
 ;                           the same for SITE. - MRA
+;       2019/01/31  -   ::FilterVersion no longer returns duplicate files with /LATEST. - MRA
 ;-
 ;*****************************************************************************************
 ;+
@@ -769,7 +770,7 @@ COUNT=count
 ;------------------------------------;
 	;Parse the file names
 	MrMMS_Parse_Filename, filenames, TSTART=fstart
-
+	
 	;Parse the start times
 	;   - Convert to TT2000
 	MrMMS_Parse_Time, Temporary(fstart), TT2000=tt2000
@@ -959,10 +960,10 @@ VERSION=version
 				temp = temp[iv]
 			ENDFOR
 			
-			;Keep matches
+			;Keep match (only one of same version)
 			IF nMatch GT 0 THEN BEGIN
-				files_out[count:count+nMatch-1] = temp
-				count += nMatch
+				files_out[count] = temp[0]
+				count += 1
 			ENDIF
 		ENDELSE
 	ENDFOR
@@ -1022,7 +1023,7 @@ COUNT=count
 	                NLOCAL  = nLocal, $
 	                NREMOTE = nRemote
 	IF nLocal + nRemote EQ 0 THEN Message, 'No local or remote files found.'
-
+	
 	;Get directories
 	self.oWeb -> GetProperty, LOCAL_ROOT  = local_root, $
 	                          NO_DOWNLOAD = no_download, $
@@ -1623,7 +1624,7 @@ COUNT=count
 	ENDCASE
 	
 	;Pre-emptive return
-	IF dir EQ '' && ROOT EQ '' THEN RETURN, ''
+	IF dir EQ '' && root EQ '' THEN RETURN, ''
 	
 	;Build the file names
 	;   - Search for all versions.
@@ -1923,7 +1924,7 @@ NREMOTE=nRemote
 			ENDIF
 		ENDIF
 	ENDELSE
-
+	
 ;-----------------------------------------------------
 ; Search Dropbox \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
@@ -2344,14 +2345,14 @@ _REF_EXTRA=extra
 		IF N_Elements(instr) GT 0 THEN BEGIN
 			IF ~Array_Equal( MrIsMember(['', 'afg', 'aspoc', 'dfg', 'dsp', 'edi', 'edp', $
 			                             'epd-eis', 'feeps', 'fgm', 'fpi', 'fsm', 'hpca', $
-			                             'hk', 'mec', 'scm'], instr), 1 ) $
+			                             'hk', 'mec', 'scm', 'fields'], instr), 1 ) $
 				THEN Message, 'Invalid value(s) for INSTR.'
 			new_instr = StrJoin(instr, ',')
 		ENDIF
 		
 		;MODE
 		IF N_Elements(mode) GT 0 THEN BEGIN
-			IF ~Array_Equal( MrIsMember(['', 'slow', 'fast', 'srvy', 'brst'], mode), 1 ) $
+			IF ~Array_Equal( MrIsMember(['', 'slow', 'fast', 'srvy', 'brst', 'hk'], mode), 1 ) $
 				THEN Message, 'Invalid value(s) for MODE.'
 			new_mode = StrJoin(mode, ',')
 		ENDIF

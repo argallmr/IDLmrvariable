@@ -106,6 +106,12 @@ OUTPUT_EXT=output_ext
 	IF N_Elements(level)     EQ 0 THEN level     = 'l2'
 	des_instr = 'des'
 	dis_instr = 'dis'
+	
+	m_e  = MrConstants('m_e')
+	m_i  = MrConstants('m_H')
+	q    = MrConstants('q')
+	kB   = MrConstants('k_b')
+	J2eV = MrConstants('J2eV')
 
 ;-------------------------------------------
 ; Variable Names ///////////////////////////
@@ -206,7 +212,10 @@ OUTPUT_EXT=output_ext
 	t_des_vname      = StrJoin([sc, des_instr, 'temptensor',     'calc', mode], '_')
 	q_des_vname      = StrJoin([sc, des_instr, 'heatflux',       'calc', mode], '_')
 	sn_des_vname     = StrJoin([sc, des_instr, 'entropy',        'calc', mode], '_')
-	sb_des_vname     = StrJoin([sc, des_instr, 'entropymaxwell', 'calc', mode], '_')
+	sb_des_vname     = StrJoin([sc, des_instr, 'entropydensity', 'maxwell',    'calc', mode], '_')
+	sbn_des_vname    = StrJoin([sc, des_instr, 'entropy',        'maxwell',    'calc', mode], '_')
+	mbar_des_vname   = StrJoin([sc, des_instr, 'entropydensity', 'nonmaxwell', 'calc', mode], '_')
+	mnbar_des_vname  = StrJoin([sc, des_instr, 'entropy',        'nonmaxwell', 'calc', mode], '_')
 	ppar_des_vname   = StrJoin([sc, des_instr, 'prespar',    'calc', mode], '_')
 	pperp1_des_vname = StrJoin([sc, des_instr, 'presperp1',  'calc', mode], '_')
 	pperp2_des_vname = StrJoin([sc, des_instr, 'presperp2',  'calc', mode], '_')
@@ -224,7 +233,10 @@ OUTPUT_EXT=output_ext
 	t_dis_vname      = StrJoin([sc, dis_instr, 'temptensor',     'calc', mode], '_')
 	q_dis_vname      = StrJoin([sc, dis_instr, 'heatflux',       'calc', mode], '_')
 	sn_dis_vname     = StrJoin([sc, dis_instr, 'entropy',        'calc', mode], '_')
-	sb_dis_vname     = StrJoin([sc, dis_instr, 'entropymaxwell', 'calc', mode], '_')
+	sb_dis_vname     = StrJoin([sc, dis_instr, 'entropydensity', 'maxwell',   'calc', mode], '_')
+	sbn_dis_vname    = StrJoin([sc, dis_instr, 'entropy',        'maxwell',   'calc', mode], '_')
+	mbar_dis_vname   = StrJoin([sc, dis_instr, 'entropydensity', 'nonmaxwell', 'calc', mode], '_')
+	mnbar_dis_vname  = StrJoin([sc, dis_instr, 'entropy',        'nonmaxwell', 'calc', mode], '_')
 	ppar_dis_vname   = StrJoin([sc, dis_instr, 'prespar',    'calc', mode], '_')
 	pperp1_dis_vname = StrJoin([sc, dis_instr, 'presperp1',  'calc', mode], '_')
 	pperp2_dis_vname = StrJoin([sc, dis_instr, 'presperp2',  'calc', mode], '_')
@@ -283,64 +295,79 @@ OUTPUT_EXT=output_ext
 	ENDIF
 
 ;-------------------------------------------
-; DES: Compute Moments /////////////////////
+; Compute Moments //////////////////////////
 ;-------------------------------------------
-	;Distribution function
-	species = 'e'
-	oDist   = MrDist4D_v1(f_des_vname, VSC=scpot_vname, SPECIES=species)
-	oDist  -> Moments, /CACHE, $
-	                   DENSITY     = oN_des, $
-	                   ENTROPY     = oS_des, $
-	                   HEATFLUX    = oQ_des, $
-	                   PRESSURE    = oP_des, $
-	                   TEMPERATURE = oT_des, $
-	                   VELOCITY    = oV_des
-
-	;Set names
-	oN_des -> SetName, n_des_vname
-	oS_des -> SetName, s_des_vname
-	oQ_des -> SetName, q_des_vname
-	oP_des -> SetName, p_des_vname
-	oT_des -> SetName, t_des_vname
-	oV_des -> SetName, v_des_vname
-
-;-------------------------------------------
-; DIS: Compute Moments /////////////////////
-;-------------------------------------------
-	;Distribution function
-	species = 'H'
-	ofDist  = MrVar_Get(f_dis_vname)
-	oDist   = MrDist4D_v1(ofDist, VSC=scpot_vname, SPECIES=species)
-	oDist  -> Moments, /CACHE, $
-	                   DENSITY     = oN_dis, $
-	                   ENTROPY     = oS_dis, $
-	                   HEATFLUX    = oQ_dis, $
-	                   PRESSURE    = oP_dis, $
-	                   TEMPERATURE = oT_dis, $
-	                   VELOCITY    = oV_dis
+	;DES
+	oDist = MrDist4D(f_des_vname, VSC=scpot_vname, SPECIES='e')
+	oN_des = oDist -> Density(/CACHE, NAME=n_des_vname)
+	oS_des = oDist -> Entropy()
+	oP_des = oDist -> Pressure(/CACHE, NAME=p_des_vname)
+	oT_des = oDist -> Temperature(/CACHE, NAME=t_des_vname)
+	oV_des = oDist -> Velocity(/CACHE, NAME=v_des_vname)
 	
-	;Set names
-	oN_dis -> SetName, n_dis_vname
-	oS_dis -> SetName, s_dis_vname
-	oQ_dis -> SetName, q_dis_vname
-	oP_dis -> SetName, p_dis_vname
-	oT_dis -> SetName, t_dis_vname
-	oV_dis -> SetName, v_dis_vname
+	;DIS
+	oDist = MrDist4D(f_dis_vname, VSC=scpot_vname, SPECIES='H')
+	oN_dis = oDist -> Density(/CACHE, NAME=n_dis_vname)
+	oS_dis = oDist -> Entropy()
+	oP_dis = oDist -> Pressure(/CACHE, NAME=p_dis_vname)
+	oT_dis = oDist -> Temperature(/CACHE, NAME=t_dis_vname)
+	oV_dis = oDist -> Velocity(/CACHE, NAME=v_dis_vname)
+	
+	;Density
+	oN_dis['AXIS_RANGE'] = [ Min([oN_dis.min, oN_des.min]), Max([oN_dis.max, oN_des.max]) ]
+	oN_dis['COLOR']      = 'Blue'
+	oN_dis['LABEL']      = 'DIS'
+	
+	oN_des['AXIS_RANGE'] = oN_dis['AXIS_RANGE']
+	oN_des['COLOR']      = 'Red'
+	oN_des['LABEL']      = 'DES'
 
+;-------------------------------------------
+; Entropy //////////////////////////////////
+;-------------------------------------------
+	
+	;DIS
+	oS_dis *= J2eV
+	oS_dis -> SetName, s_dis_vname
+	oS_dis -> Cache
+	
+	;DES
+	oS_des *= J2eV
+	oS_des -> SetName, s_des_vname
+	oS_des -> Cache
+	
+	oS_dis['COLOR']      = 'Red'
+	oS_dis['LABEL']      = 's'
+	oS_dis['TITLE']      = 'si!C(eV/K/m$\up3$)'
+	oS_dis['UNITS']      = 'eV/K/m^3 ln(s^3/m^6)'
+	
+	oS_des['COLOR']      = 'Red'
+	oS_des['LABEL']      = 's'
+	oS_des['TITLE']      = 'se!C(eV/K/m$\up3$)'
+	oS_des['UNITS']      = 'eV/K/m^3 ln(s^3/m^6)'
+	
 ;-------------------------------------------
 ; Entropy Per Particle /////////////////////
 ;-------------------------------------------
 
-	;DES
-	oSn_des = oS_des / oN_des
-	oSn_des -> SetName, sn_des_vname
-	oSn_des -> Cache
-
+	;Calculations
+	;   - Match minimum values so they are on the same scale
+	oSn_des = oS_des / (1e6 * oN_des)
+	oSn_dis = oS_dis / (1e6 * oN_dis)
+	
 	;DIS
-	oSn_dis = oS_dis / oN_dis
-	oSn_dis = oSn_dis + (oSn_des.min - oSn_dis.min)
 	oSn_dis -> SetName, sn_dis_vname
 	oSn_dis -> Cache
+	oSn_dis['COLOR'] = 'Red'
+	oSn_dis['LABEL'] = 's/N'
+	oSn_dis['TITLE'] = 'si/N!C(eV/K)'
+	
+	;DES
+	oSn_des -> SetName, sn_des_vname
+	oSn_des -> Cache
+	oSn_des['COLOR'] = 'Red'
+	oSn_des['LABEL'] = 's/N'
+	oSn_des['TITLE'] = 'se/N!C(eV/K)'
 
 ;-------------------------------------------
 ; DES: T & P -- Par & Perp /////////////////
@@ -363,6 +390,9 @@ OUTPUT_EXT=output_ext
 	oP_scl_des   = (oP_par_des + oP_perp1_des + oP_perp2_des) / 3.0
 	oP_scl_des  -> SetName, p_scal_des_vname
 	oP_scl_des  -> Cache
+	oP_scl_des['COLOR'] = 'Red'
+	oP_scl_des['LABEL'] = 'DES'
+	oP_scl_des['TITLE'] = 'P!C(nT)'
 	
 	;Temperatures
 	oT_par_des   = MrScalarTS( oT_fac['TIMEVAR'], oT_fac[*,0,0], /CACHE, NAME=tpar_des_vname)
@@ -398,6 +428,9 @@ OUTPUT_EXT=output_ext
 	oP_scl_dis   = (oP_par_dis + oP_perp1_dis + oP_perp2_dis) / 3.0
 	oP_scl_dis  -> SetName, p_scal_dis_vname
 	oP_scl_dis  -> Cache
+	oP_scl_dis['COLOR'] = 'Blue'
+	oP_scl_dis['LABEL'] = 'DIS'
+	oP_scl_dis['TITLE'] = 'P!C(nT)'
 
 	;Temperatures
 	oT_par_dis   = MrScalarTS( oT_fac['TIMEVAR'], oT_fac[*,0,0], /CACHE, NAME=tpar_dis_vname)
@@ -457,6 +490,44 @@ OUTPUT_EXT=output_ext
 	oTe_scl  -> Cache
 	
 	Obj_Destroy, [oT_fac, oP_fac]
+	
+	
+	;
+	; ATTRIBUTES
+	;
+	perange = [ Min( [oPe_par.min, oPe_perp.min] ), $
+	            Max( [oPe_par.max, oPe_perp.max] ) ]
+	terange = [ Min( [oTe_par.min, oTe_perp.min] ), $
+	            Max( [oTe_par.max, oTe_perp.max] ) ]
+	
+	;DES - PAR
+	oPe_par['AXIS_RANGE'] = perange
+	oPe_par['COLOR']      = 'Blue'
+	oPe_par['LABEL']      = 'Par'
+	oPe_par['TITLE']      = 'Pe!C(nPa)'
+	
+	;DES - PERP
+	oPe_perp['AXIS_RANGE'] = perange
+	oPe_perp['COLOR']      = 'Red'
+	oPe_perp['LABEL']      = 'Perp'
+	oPe_perp['TITLE']      = 'Pe!C(nPa)'
+	
+	;DES - SCALAR
+	oPe_scl['COLOR'] = 'Red'
+	oPe_scl['LABEL'] = 'DES'
+	oPe_scl['TITLE'] = 'P!C(nPa)'
+	
+	;DES - PAR
+	oTe_par['AXIS_RANGE'] = terange
+	oTe_par['COLOR']      = 'Blue'
+	oTe_par['LABEL']      = 'Par'
+	oTe_par['TITLE']      = 'Te!C(eV)'
+	
+	;DES - PERP
+	oTe_perp['AXIS_RANGE'] = terange
+	oTe_perp['COLOR']      = 'Red'
+	oTe_perp['LABEL']      = 'Perp'
+	oTe_perp['TITLE']      = 'Te!C(eV)'
 
 ;-------------------------------------------
 ; FPI-DIS: T & P -- Par & Perp /////////////
@@ -506,185 +577,14 @@ OUTPUT_EXT=output_ext
 	oTi_scl -> Cache
 	
 	Obj_Destroy, [oT_fac, oP_fac]
-
-;-------------------------------------------
-; Maxwellian Entropy ///////////////////////
-;-------------------------------------------
-	;DES
-	oSb_des = (1e-9 * oP_scl_des) / ( MrConstants('m_e') * 1e6 * oN_des )^(5.0/3.0)
-	oSb_des -> SetData, alog10(oSb_des['DATA'])
-	oSb_des -> SetName, sb_des_vname
-	oSb_des -> Cache
-	
-	;DIS
-	oSb_dis = (1e-9 * oP_scl_dis) / ( MrConstants('m_H') * 1e6 * oN_dis )^(5.0/3.0)
-	oSb_dis -> SetData, alog10(oSb_dis['DATA'])
-	oSb_dis -> SetData, oSb_dis['DATA'] + (oSb_des.min - oSb_dis.min)
-	oSb_dis -> SetName, sb_dis_vname
-	oSb_dis -> Cache
-
-;-------------------------------------------
-; FPI: Maxwellian Entropy //////////////////
-;-------------------------------------------
-	;DES
-	oNe  = MrVar_Get(ne_vname)
-	oSbe = (1e-9 * oPe_scl) / ( MrConstants('m_e') * 1e6 * oNe )^(5.0/3.0)
-	oSbe -> SetData, alog10(oSbe['DATA'])
-	oSbe -> SetName, sbe_vname
-	oSbe -> Cache
-	
-	;DIS
-	oNi  = MrVar_Get(ni_vname)
-	oSbi = (1e-9 * oPi_scl) / ( MrConstants('m_H') * 1e6 * oNi )^(5.0/3.0)
-	oSbi -> SetData, alog10(oSbi['DATA'])
-	oSbi -> SetData, oSbi['DATA'] + (oSbe.min - oSbi.min)
-	oSbi -> SetName, sbi_vname
-	oSbi -> Cache
-
-;-------------------------------------------
-; Pressure /////////////////////////////////
-;-------------------------------------------
-	;Magnetic Pressure
-	;   - 1e-9 converst to nPa
-	oB  = MrVar_Get(bmag_vname)
-	oPb = oB^2 / (1e9 * 2 * MrConstants('mu_0'))
-	oPb -> SetName, b_press_vname
-	oPb -> Cache
-	
-	;CALC: Total Pressure
-	oPb_temp    = oPb        -> Interpol(oP_scl_des)
-	oP_dis_temp = oP_scl_dis -> Interpol(oP_scl_des)
-	
-	oPt = oPb_temp + oP_scl_des + oP_dis_temp
-	oPt -> SetName, ptot_vname
-	oPt -> Cache
-	
-	Obj_Destroy, [oPb_temp, oP_dis_temp]
-	
-	;FPI Total pressure
-	oPb_temp = oPb     -> Interpol(oPe_scl)
-	oPi_temp = oPi_scl -> Interpol(oPe_scl)
-
-	oPt_fpi = oPb_temp + oPe_scl + oPi_temp
-	oPt_fpi -> SetName, ptot_fpi_vname
-	oPt_fpi -> Cache
-	
-	Obj_Destroy, [oPb_temp, oPi_temp]
-
-;-------------------------------------------
-; Attributes ///////////////////////////////
-;-------------------------------------------
-
-	;B
-	oB = MrVar_Get(b_vname)
-	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level, coords], ' ' ) )
 	
 	;
-	; Density
-	;
-	
-	;DIS
-	oN_dis['AXIS_RANGE'] = [ Min([oN_dis.min, oN_des.min]), Max([oN_dis.max, oN_des.max]) ]
-	oN_dis['COLOR']      = 'Blue'
-	oN_dis['LABEL']      = 'DIS'
-	
-	;DES
-	oN_des['AXIS_RANGE'] = oN_dis['AXIS_RANGE']
-	oN_des['COLOR']      = 'Red'
-	oN_des['LABEL']      = 'DES'
-	
-	;
-	; Entropy per particle
-	;
-	
-	;DIS
-	oSn_dis['AXIS_RANGE'] = [ Min([oSn_dis.min, oSn_dis.min]), Max([oSn_dis.max, oSn_dis.max]) ]
-	oSn_dis['COLOR'] = 'Blue'
-	oSn_dis['LABEL'] = 'DIS'
-	oSn_dis['TITLE'] = 'S/N!C(J/K)'
-	
-	;DES
-	oSn_des['AXIS_RANGE'] = oSn_dis['AXIS_RANGE']
-	oSn_des['COLOR'] = 'Red'
-	oSn_des['LABEL'] = 'DES'
-	oSn_des['TITLE'] = 'S/N!C(J/K)'
-	
-	;
-	; Entropy of Equivalent Maxwellian Distribution
-	;
-	
-	;DIS
-	oSb_dis['AXIS_RANGE'] = [ Min([oSb_dis.min, oSb_des.min]), Max([oSb_dis.max, oSb_des.max]) ]
-	oSb_dis['COLOR']      = 'Blue'
-	oSb_dis['LABEL']      = 'DIS'
-	oSb_dis['TITLE']      = 'p/$\rho$$\up5/3$'
-	
-	;DES
-	oSb_des['AXIS_RANGE'] = oSb_dis['AXIS_RANGE']
-	oSb_des['COLOR']      = 'Red'
-	oSb_des['LABEL']      = 'DES'
-	oSb_des['TITLE']      = 'Log(p/$\rho$$\up5/3$)'
-	
-	;
-	; FPI: Entropy of Equivalent Maxwellian Distribution
-	;
-	
-	;DIS
-	oSbi['AXIS_RANGE'] = [ Min([oSbi.min, oSbe.min]), Max([oSbi.max, oSbe.max]) ]
-	oSbi['COLOR']      = 'Blue'
-	oSbi['LABEL']      = 'DIS'
-	oSbi['TITLE']      = 'p/$\rho$$\up5/3$'
-	
-	;DES
-	oSbe['AXIS_RANGE'] = oSbi['AXIS_RANGE']
-	oSbe['COLOR']      = 'Red'
-	oSbe['LABEL']      = 'DES'
-	oSbe['TITLE']      = 'Log(p/$\rho$$\up5/3$)'
-	
-	;
-	; Pressure
-	;
-	
-	;Total
-	oPt['AXIS_RANGE'] = [0, oPt.max*1.1]
-	oPt['COLOR']      = 'Black'
-	oPt['LABEL']      = 'Total'
-	oPt['TITLE']      = 'P!C(nT)'
-	
-	;FGM
-	oPb['COLOR'] = 'Forest Green'
-	oPb['LABEL'] = 'FGM'
-	oPb['TITLE'] = 'P!C(nT)'
-	
-	;DIS
-	oP_scl_dis['COLOR'] = 'Blue'
-	oP_scl_dis['LABEL'] = 'DIS'
-	oP_scl_dis['TITLE'] = 'P!C(nT)'
-	
-	;DES
-	oP_scl_des['COLOR'] = 'Red'
-	oP_scl_des['LABEL'] = 'DES'
-	oP_scl_des['TITLE'] = 'P!C(nT)'
-	
-	;
-	
-	;
-	; FPI Pressure
+	; ATTRIBUTES
 	;
 	pirange = [ Min( [oPi_par.min, oPi_perp.min] ), $
 	            Max( [oPi_par.max, oPi_perp.max] ) ]
 	tirange = [ Min( [oTi_par.min, oTi_perp.min] ), $
 	            Max( [oTi_par.max, oTi_perp.max] ) ]
-	perange = [ Min( [oPe_par.min, oPe_perp.min] ), $
-	            Max( [oPe_par.max, oPe_perp.max] ) ]
-	terange = [ Min( [oTe_par.min, oTe_perp.min] ), $
-	            Max( [oTe_par.max, oTe_perp.max] ) ]
-	
-	;Total
-	oPt_fpi['AXIS_RANGE'] = [0, oPt_fpi.max*1.1]
-	oPt_fpi['COLOR']      = 'Black'
-	oPt_fpi['LABEL']      = 'Total'
-	oPt_fpi['TITLE']      = 'P!C(nPa)'
 	
 	;DIS - PAR
 	oPi_par['AXIS_RANGE'] = pirange
@@ -703,27 +603,6 @@ OUTPUT_EXT=output_ext
 	oPi_scl['LABEL'] = 'DIS'
 	oPi_scl['TITLE'] = 'P!C(nPa)'
 	
-	;DES - PAR
-	oPe_par['AXIS_RANGE'] = perange
-	oPe_par['COLOR']      = 'Blue'
-	oPe_par['LABEL']      = 'Par'
-	oPe_par['TITLE']      = 'Pe!C(nPa)'
-	
-	;DES - PERP
-	oPe_perp['AXIS_RANGE'] = perange
-	oPe_perp['COLOR']      = 'Red'
-	oPe_perp['LABEL']      = 'Perp'
-	oPe_perp['TITLE']      = 'Pe!C(nPa)'
-	
-	;DES - SCALAR
-	oPe_scl['COLOR'] = 'Red'
-	oPe_scl['LABEL'] = 'DES'
-	oPe_scl['TITLE'] = 'P!C(nPa)'
-	
-	;
-	; FPI Temperature
-	;
-	
 	;DIS - PAR
 	oTi_par['AXIS_RANGE'] = tirange
 	oTi_par['COLOR']      = 'Blue'
@@ -735,30 +614,195 @@ OUTPUT_EXT=output_ext
 	oTi_perp['COLOR']      = 'Red'
 	oTi_perp['LABEL']      = 'Perp'
 	oTi_perp['TITLE']      = 'Ti!C(eV)'
+
+;-------------------------------------------
+; Maxwellian Entropy ///////////////////////
+;-------------------------------------------
+	;Integration of the distribution function is performed in MKS units. As such,
+	;the logarithm should be also.
+
+	;DES
+	;   - Entroy per unit volume
+	;   - Constant factors convert to MKS
+	oSb_des = 3.0/2.0 * kB * J2eV * 1e6 * oN_des $
+	          * ALog( 2 * !pi * 1e-11 / m_e * oP_scl_des['DATA'] / oN_des['DATA']^(5.0/3.0) + 1 )
 	
-	;DES - PAR
-	oTe_par['AXIS_RANGE'] = terange
-	oTe_par['COLOR']      = 'Blue'
-	oTe_par['LABEL']      = 'Par'
-	oTe_par['TITLE']      = 'Te!C(eV)'
+	;DIS
+	oSb_dis = 3.0/2.0 * kB * J2eV * 1e6 * oN_dis $
+	          * ALog( 2 * !pi * 1e-11 / m_i * oP_scl_dis['DATA'] / oN_dis['DATA']^(5.0/3.0) + 1 )
 	
-	;DES - PERP
-	oTe_perp['AXIS_RANGE'] = terange
-	oTe_perp['COLOR']      = 'Red'
-	oTe_perp['LABEL']      = 'Perp'
-	oTe_perp['TITLE']      = 'Te!C(eV)'
+	;DIS
+	oSb_dis -> SetName, sb_dis_vname
+	oSb_dis -> Cache
+	oSb_dis['COLOR']      = 'Black'
+	oSb_dis['LABEL']      = 's$\downB$'
+	oSb_dis['TITLE']      = 'si$\downB$!C(eV/K/m$\up3$)'
+	oSb_dis['UNITS']      = 'eV/K/m^3 ln(J m^2/kg)'
 	
+	;DES
+	oSb_des -> SetName, sb_des_vname
+	oSb_des -> Cache
+	oSb_des['COLOR']      = 'Black'
+	oSb_des['LABEL']      = 's$\downB$'
+	oSb_des['TITLE']      = 'se$\downB$!C(eV/K/m$\up3$)'
+	oSb_des['UNITS']      = 'eV/K/m^3 ln(J m^2/kg)'
+
+;-------------------------------------------
+; Maxwellian Entropy per Particle //////////
+;-------------------------------------------
+	;DIS
+	oSbn_dis = oSb_dis / (1e6 * oN_dis)
+	oSbn_dis -> SetName, sbn_dis_vname
+	oSbn_dis -> Cache
+	oSbn_dis['COLOR']      = 'Black'
+	oSbn_dis['LABEL']      = 's$\downB$/N'
+	oSbn_dis['TITLE']      = 'si$\downB$/N!C(eV/K/m$\up3$)'
+	oSbn_dis['UNITS']      = 'eV/K/m^3 ln(J m^2/kg)'
+	
+	;DES
+	oSbn_des = oSb_des / (1e6 * oN_des)
+	oSbn_des -> SetName, sbn_des_vname
+	oSbn_des -> Cache
+	oSbn_des['COLOR']      = 'Black'
+	oSbn_des['LABEL']      = 's$\downB$/N'
+	oSbn_des['TITLE']      = 'si$\downB$/N!C(eV/K)'
+	oSbn_des['UNITS']      = 'eV/K ln(J m^2/kg)'
+
+;-------------------------------------------
+; Non-Maxwellian Entropy ///////////////////
+;-------------------------------------------
+	
+	;MBAR
+	oMbar_des  = oS_des  - oS_des
+	oMnbar_des = oSn_des - oSbn_des
+	oMbar_dis  = oS_dis  - oSb_dis
+	oMnbar_dis = oSn_dis - oSbn_dis
+	
+	oMbar_des -> SetName, mbar_des_vname
+	oMbar_des -> Cache
+	oMbar_des['COLOR'] = 'Red'
+	oMbar_des['LABEL'] = 'DES'
+	oMbar_des['TITLE'] = 'M!C(eV/K/m$\up3$)'
+	oMbar_des['UNITS'] = 'eV/K/m^3 ln(J m^2/kg)'
+	
+	oMnbar_des -> SetName, mnbar_des_vname
+	oMnbar_des -> Cache
+	oMnbar_des['COLOR'] = 'Red'
+	oMnbar_des['LABEL'] = 'DES'
+	oMnbar_des['TITLE'] = 'M/N!C(eV/K)'
+	oMnbar_des['UNITS'] = 'eV/K ln(J m^2/kg)'
+	
+	oMbar_des -> SetName, mbar_dis_vname
+	oMbar_dis -> Cache
+	oMbar_dis['COLOR'] = 'Blue'
+	oMbar_dis['LABEL'] = 'DIS'
+	oMbar_dis['TITLE'] = 'M!C(eV/K/m$\up3$)'
+	oMbar_dis['UNITS'] = 'eV/K/m^3 ln(J m^2/kg)'
+	
+	oMnbar_dis -> SetName, mnbar_dis_vname
+	oMnbar_dis -> Cache
+	oMnbar_dis['COLOR'] = 'Blue'
+	oMnbar_dis['LABEL'] = 'DIS'
+	oMnbar_dis['TITLE'] = 'M/N!C(eV/K)'
+	oMnbar_dis['UNITS'] = 'eV/K ln(J m^2/kg)'
+	
+
+;-------------------------------------------
+; FPI: Maxwellian Entropy //////////////////
+;-------------------------------------------
+	;DES
+	oNe  = MrVar_Get(ne_vname)
+	oSbe = 3.0/2.0 * kB * J2eV * 1e6 * oN_des $
+	       * ALog( 2 * !pi * 1e-11 / m_e * oPe_scl['DATA'] / oNe['DATA']^(5.0/3.0) + 1 )
+	
+	;DIS
+	oNi  = MrVar_Get(ni_vname)
+	oSbi = 3.0/2.0 * kB * J2eV * 1e6 * oNi $
+	       * ALog( 2 * !pi * 1e-11 / m_i * oPi_scl['DATA'] / oNi['DATA']^(5.0/3.0) + 1 )
+	
+	;DIS
+	oSbi -> SetName, sbi_vname
+	oSbi -> Cache
+	oSbi['AXIS_RANGE'] = [ Min([oSbi.min, oSbe.min]), Max([oSbi.max, oSbe.max]) ]
+	oSbi['COLOR']      = 'Blue'
+	oSbi['LABEL']      = 'DIS'
+	oSbi['TITLE']      = 's$\downB$!C(eV/K/m$\up3$)'
+	oSbi['UNITS']      = 'eV/K/m^3 ln(J m^2/kg)'
+	
+	;DES
+	oSbe -> SetName, sbe_vname
+	oSbe -> Cache
+	oSbe['AXIS_RANGE'] = oSbi['AXIS_RANGE']
+	oSbe['COLOR']      = 'Red'
+	oSbe['LABEL']      = 'DES'
+	oSbe['TITLE']      = 's$\downB$!C(eV/K/m$\up3$)'
+	oSbe['UNITS']      = 'eV/K/m^3 ln(J m^2/kg)'
+
+;-------------------------------------------
+; Pressure /////////////////////////////////
+;-------------------------------------------
+	;Magnetic Pressure
+	;   - 1e-9 converst to nPa
+	oB  = MrVar_Get(bmag_vname)
+	oPb = oB^2 / (1e9 * 2 * MrConstants('mu_0'))
+	oPb -> SetName, b_press_vname
+	oPb -> Cache
+	oPb['COLOR'] = 'Forest Green'
+	oPb['LABEL'] = 'FGM'
+	oPb['TITLE'] = 'P!C(nT)'
+	
+	;CALC: Total Pressure
+	oPb_temp    = oPb        -> Interpol(oP_scl_des)
+	oP_dis_temp = oP_scl_dis -> Interpol(oP_scl_des)
+	
+	oPt = oPb_temp + oP_scl_des + oP_dis_temp
+	oPt -> SetName, ptot_vname
+	oPt -> Cache
+	oPt['AXIS_RANGE'] = [0, oPt.max*1.1]
+	oPt['COLOR']      = 'Black'
+	oPt['LABEL']      = 'Total'
+	oPt['TITLE']      = 'P!C(nT)'
+	
+	Obj_Destroy, [oPb_temp, oP_dis_temp]
+	
+	;FPI Total pressure
+	oPb_temp = oPb     -> Interpol(oPe_scl)
+	oPi_temp = oPi_scl -> Interpol(oPe_scl)
+
+	oPt_fpi = oPb_temp + oPe_scl + oPi_temp
+	oPt_fpi -> SetName, ptot_fpi_vname
+	oPt_fpi -> Cache
+	oPt_fpi['AXIS_RANGE'] = [0, oPt_fpi.max*1.1]
+	oPt_fpi['COLOR']      = 'Black'
+	oPt_fpi['LABEL']      = 'Total'
+	oPt_fpi['TITLE']      = 'P!C(nPa)'
+	
+	Obj_Destroy, [oPb_temp, oPi_temp]
+
+;-------------------------------------------
+; Attributes ///////////////////////////////
+;-------------------------------------------
+
+	;B
+	oB = MrVar_Get(b_vname)
+	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level, coords], ' ' ) )
+	
+	oSn_dis['AXIS_RANGE']    = [ Min([oSn_dis.min, oSbn_dis.min]), Max([oSn_dis.max, oSbn_dis.max]) ]
+	oSbn_dis['AXIS_RANGE']   = oSn_dis['AXIS_RANGE']
+	oSn_des['AXIS_RANGE']    = [ Min([oSn_des.min, oSbn_des.min]), Max([oSn_des.max, oSbn_des.max]) ]
+	oSbn_des['AXIS_RANGE']   = oSn_des['AXIS_RANGE']
+	oMnbar_des['AXIS_RANGE'] = [ Min([oMnbar_des.min, oMnbar_dis.min]), Max([oMnbar_des.max, oMnbar_dis.max]) ]
+	oMnbar_dis['AXIS_RANGE'] = oMnbar_des['AXIS_RANGE']
 ;-------------------------------------------
 ; Plot /////////////////////////////////////
 ;-------------------------------------------
-
-	win = MrVar_PlotTS(  [ b_vname, n_des_vname, sn_des_vname, sbe_vname, ptot_fpi_vname, $
+	win = MrVar_PlotTS(  [ b_vname, n_des_vname, sn_des_vname, sn_dis_vname, mnbar_des_vname, ptot_fpi_vname, $
 	                       pi_par_vname, pe_par_vname, ti_par_vname, te_par_vname], $
 	                    /NO_REFRESH, $
 	                    YSIZE = 750 )
 	
-	win = MrVar_OPlotTS( [n_des_vname, sn_des_vname, sbe_vname, ptot_fpi_vname], $
-	                     [n_dis_vname, sn_dis_vname, sbi_vname, b_press_vname] )
+	win = MrVar_OPlotTS( [n_des_vname, sn_des_vname, sn_dis_vname, mnbar_des_vname, ptot_fpi_vname], $
+	                     [n_dis_vname, sbn_des_vname, sbn_dis_vname, mnbar_dis_vname, b_press_vname] )
 	win = MrVar_OPlotTS( ptot_fpi_vname, pi_scal_vname )
 	win = MrVar_OPlotTS( ptot_fpi_vname, pe_scal_vname )
 	win = MrVar_OPlotTS( pi_par_vname, pi_perp_vname )

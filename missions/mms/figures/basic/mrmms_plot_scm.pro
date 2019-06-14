@@ -91,6 +91,7 @@ OPTDESC=optdesc, $
 OUTPUT_DIR=output_dir, $
 OUTPUT_EXT=output_ext, $
 NO_LOAD=no_load, $
+TEAM_SITE=team_site, $
 TRANGE=trange
 	Compile_Opt idl2
 	
@@ -166,11 +167,13 @@ TRANGE=trange
 		MrMMS_FGM_Load_Data, sc, mode, $
 		                     INSTR     = fgm_instr, $
 		                     LEVEL     = level, $
+		                     TEAM_SITE = team_site, $
 		                     VARFORMAT = fgm_b_vname
 
 		;SCM
 		MrMMS_Load_Data, sc, instr, mode, level, $
 		                 OPTDESC   = optdesc, $
+		                 TEAM_SITE = team_site, $
 		                 VARFORMAT = b_vname
 	ENDIF
 
@@ -182,12 +185,22 @@ TRANGE=trange
 	oB -> Split, oBx, oBy, oBz, /CACHE
 	
 	;Compute PSD
-	oBx_psd = oBx -> Spectrogram(nfft, nshift, NAME=bxpsd_vname, /CACHE, WINDOW='hanning')
-	oBy_psd = oBy -> Spectrogram(nfft, nshift, NAME=bypsd_vname, /CACHE, WINDOW='hanning')
-	oBz_psd = oBz -> Spectrogram(nfft, nshift, NAME=bzpsd_vname, /CACHE, WINDOW='hanning')
+	IF tf_load THEN BEGIN
+		oBx_psd = oBx -> Spectrogram(nfft, nshift, NAME=bxpsd_vname, /CACHE, WINDOW='hanning')
+		oBy_psd = oBy -> Spectrogram(nfft, nshift, NAME=bypsd_vname, /CACHE, WINDOW='hanning')
+		oBz_psd = oBz -> Spectrogram(nfft, nshift, NAME=bzpsd_vname, /CACHE, WINDOW='hanning')
+	ENDIF ELSE BEGIN
+		oBx_psd = MrVar_Get(bxpsd_vname)
+		oBy_psd = MrVar_Get(bypsd_vname)
+		oBz_psd = MrVar_Get(bzpsd_vname)
+	ENDELSE
 	
 	;Pick the color range so that it cuts out 1% of the low range and 0.2% of the high range
-	psd_range = ALog10( [ Min( [oBx_psd.min, oBy_psd.min, oBz_psd.min] ), $
+	ix = oBx_psd -> Where(0.0, /GREATER)
+	iy = oBy_psd -> Where(0.0, /GREATER)
+	iz = oBz_psd -> Where(0.0, /GREATER)
+	
+	psd_range = ALog10( [ Min( [Min(oBx_psd['DATA',ix]), Min(oBy_psd['DATA',iy]), Min(oBz_psd['DATA',iz])] ), $
 	                      Max( [oBx_psd.max, oBy_psd.max, oBz_psd.max] ) ] )
 	h         = Histogram( Reform( ALog10(oBx_psd['DATA']), N_Elements(oBx_psd) ), $
 	                       MIN     = psd_range[0], $
@@ -200,53 +213,57 @@ TRANGE=trange
 ;-------------------------------------------
 ; Gyrofrequency Lines //////////////////////
 ;-------------------------------------------
-	oBmag  = MrVar_Get(fgm_bmag_vname)
+	tf_fgm = MrVar_IsCached(fgm_bmag_vname)
+	IF tf_fgm THEN BEGIN
+		;BMAG
+		oBmag  = MrVar_Get(fgm_bmag_vname)
+		
+		;B
+		oB = MrVar_Get(fgm_b_vname)
+		oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level, optdesc], ' ' ) )
 	
-	;Electron cyclotron frequency
-	IF mode EQ 'brst' THEN BEGIN
-		;fce
-		of1 = MrVar_Freq_Cyclotron(oBmag, 'm_e', /CACHE, NAME=f1_vname)
+		;Electron cyclotron frequency
+		IF mode EQ 'brst' THEN BEGIN
+			;fce
+			of1 = MrVar_Freq_Cyclotron(oBmag, 'm_e', /CACHE, NAME=f1_vname)
 		
-		;0.5  * fce
-		of2 = of1 / 2.0
-		of2 -> SetName, f2_vname
-		of2 -> Cache
+			;0.5  * fce
+			of2 = of1 / 2.0
+			of2 -> SetName, f2_vname
+			of2 -> Cache
 		
-		;FC_E
-		of1['COLOR'] = 'White'
-		of1['NSUM']  = 4
+			;FC_E
+			of1['COLOR'] = 'White'
+			of1['NSUM']  = 4
 		
-		;0.5*FC_$
-		of2['COLOR']     = 'White'
-		of2['LINESTYLE'] = '--'
-		of2['NSUM']      = 4
+			;0.5*FC_$
+			of2['COLOR']     = 'White'
+			of2['LINESTYLE'] = '--'
+			of2['NSUM']      = 4
 
-	;Ion cyclotron frequencies
-	ENDIF ELSE BEGIN
-		of1 = MrVar_Freq_Cyclotron(oBmag, 'm_H',  /CACHE, NAME=f1_vname)
-		of2 = MrVar_Freq_Cyclotron(oBmag, 'm_He', /CACHE, NAME=f2_vname)
-		of3 = MrVar_Freq_Cyclotron(oBmag, 'm_O',  /CACHE, NAME=f3_vname)
+		;Ion cyclotron frequencies
+		ENDIF ELSE BEGIN
+			of1 = MrVar_Freq_Cyclotron(oBmag, 'm_H',  /CACHE, NAME=f1_vname)
+			of2 = MrVar_Freq_Cyclotron(oBmag, 'm_He', /CACHE, NAME=f2_vname)
+			of3 = MrVar_Freq_Cyclotron(oBmag, 'm_O',  /CACHE, NAME=f3_vname)
 		
-		;FC_H
-		of1['COLOR'] = 'Blue'
-		of1['NSUM']  = 4
+			;FC_H
+			of1['COLOR'] = 'Blue'
+			of1['NSUM']  = 4
 	
-		;FC_HE
-		of2['COLOR'] = 'Magenta'
-		of2['NSUM']  = 4
+			;FC_HE
+			of2['COLOR'] = 'Magenta'
+			of2['NSUM']  = 4
 	
-		;FC_HE
-		of3['COLOR'] = 'Orange'
-		of3['NSUM']  = 4
-	ENDELSE
+			;FC_HE
+			of3['COLOR'] = 'Orange'
+			of3['NSUM']  = 4
+		ENDELSE
+	ENDIF
 	
 ;-------------------------------------------
 ; Properties ///////////////////////////////
 ;-------------------------------------------
-	;BMAG
-	oB = MrVar_Get(fgm_b_vname)
-	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level, optdesc], ' ' ) )
-	
 	;Bx
 	oBx['TITLE'] = 'Bx!C(nT)'
 	
@@ -282,15 +299,17 @@ TRANGE=trange
 	                    YSIZE = 700 )
 	
 	;Cyclotron frequencies
-	IF mode EQ 'brst' THEN BEGIN
-		win = MrVar_OPlotTS( bxpsd_vname, [f1_vname, f2_vname] )
-		win = MrVar_OPlotTS( bypsd_vname, [f1_vname, f2_vname] )
-		win = MrVar_OPlotTS( bzpsd_vname, [f1_vname, f2_vname] )
-	ENDIF ELSE BEGIN
-		win = MrVar_OPlotTS( bxpsd_vname, [f1_vname, f2_vname, f3_vname] )
-		win = MrVar_OPlotTS( bypsd_vname, [f1_vname, f2_vname, f3_vname] )
-		win = MrVar_OPlotTS( bzpsd_vname, [f1_vname, f2_vname, f3_vname] )
-	ENDELSE
+	IF tf_fgm THEN BEGIN
+		IF mode EQ 'brst' THEN BEGIN
+			win = MrVar_OPlotTS( bxpsd_vname, [f1_vname, f2_vname] )
+			win = MrVar_OPlotTS( bypsd_vname, [f1_vname, f2_vname] )
+			win = MrVar_OPlotTS( bzpsd_vname, [f1_vname, f2_vname] )
+		ENDIF ELSE BEGIN
+			win = MrVar_OPlotTS( bxpsd_vname, [f1_vname, f2_vname, f3_vname] )
+			win = MrVar_OPlotTS( bypsd_vname, [f1_vname, f2_vname, f3_vname] )
+			win = MrVar_OPlotTS( bzpsd_vname, [f1_vname, f2_vname, f3_vname] )
+		ENDELSE
+	ENDIF
 
 	;Pretty-up the window
 	win[0] -> SetLayout, [1,1]

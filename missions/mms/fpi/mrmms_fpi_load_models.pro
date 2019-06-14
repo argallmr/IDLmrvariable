@@ -113,7 +113,7 @@ VARNAMES=varnames
 ;-----------------------------------------------------
 	
 	;Get the photo electron model
-	stepper_id = StRegEx( fphe, 'p([0-9]-[0-9])', /SUBEXP, /EXTRACT )
+	stepper_id = StRegEx( fphe, 'p([0-9]+-[0-9]+)', /SUBEXP, /EXTRACT )
 	stepper_id = stepper_id[1]
 	
 	;Create the photoelectron model file name
@@ -148,7 +148,6 @@ VARNAMES=varnames
 ;-----------------------------------------------------
 ; Load the Data \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
-	
 	;Load the data
 	MrVar_ReadCDF, files, $
 	               SUFFIX    = suffix, $

@@ -80,6 +80,7 @@
 ; :History:
 ;   Modification History::
 ;       2018/02/10  -   Written by Matthew Argall
+;       2018/05/07  -   Filter individual spacecraft fields before gradients/averaging. - MRA
 ;-
 FUNCTION MrMMS_Plot_4sc_EMaxwell, mode, $
 FC = fc, $
@@ -118,6 +119,7 @@ TRANGE=trange
 	q         = MrConstants('q')
 	sc_colors = ['Black', 'Red', 'Green', 'Blue']
 	nabla     = '!9'+String(71B)+'!X'
+	partial   = '!9'+String(68B)+'!X'
 	
 ;-------------------------------------------
 ; Variable Parameters //////////////////////
@@ -163,12 +165,15 @@ TRANGE=trange
 		ELSE r_vnames    = StrUpCase(sc) + '_' + StrUpCase(ephdesc) + '_' + 'R'
 	
 	;Output names
+	bf_vnames     = sc + '_' + StrJoin([fgm_instr, 'bvec', fgm_coords, 'lpfilt', fgm_mode, fgm_level], '_')
+	ef_vnames     = sc + '_' + StrJoin([edp_instr, 'dce',  edp_coords, 'lpfilt', edp_mode, level], '_' )
+	vf_vnames     = sc + '_' + StrJoin([edp_instr, 'scpot', 'lpfilt',            edp_mode, level], '_' )
 	bmag_bary_vname = StrJoin( ['mms', 'fgm', 'bmag', fgm_coords, 'bary', fgm_mode, fgm_level], '_' )
 	b_bary_vname  = StrJoin( ['mms', 'fgm', 'b', fgm_coords, 'bary', fgm_mode, fgm_level], '_' )
 	bx_bary_vname = b_bary_vname + '_x'
 	by_bary_vname = b_bary_vname + '_y'
 	bz_bary_vname = b_bary_vname + '_z'
-	bf_bary_vname = StrJoin( ['mms', 'fgm', 'b', fgm_coords, 'bary', 'lpfilt', fgm_mode, fgm_level], '_' )
+;	bf_bary_vname = StrJoin( ['mms', 'fgm', 'b', fgm_coords, 'bary', 'lpfilt', fgm_mode, fgm_level], '_' )
 	dBdt_vname    = StrJoin( ['mms', 'fgm', 'bdot', fgm_coords, 'bary', fgm_mode, fgm_level], '_' )
 	dBxdt_vname   = dBdt_vname + '_x'
 	dBydt_vname   = dBdt_vname + '_y'
@@ -186,7 +191,7 @@ TRANGE=trange
 	curlEx_vname  = curlE_vname + '_x'
 	curlEy_vname  = curlE_vname + '_y'
 	curlEz_vname  = curlE_vname + '_z'
-	curlEf_vname  = StrJoin( ['mms', 'dce', 'curle', 'lpfilt', edp_mode, level], '_' )
+;	curlEf_vname  = StrJoin( ['mms', 'dce', 'curle', 'lpfilt', edp_mode, level], '_' )
 		
 ;-------------------------------------------
 ; Get Data /////////////////////////////////
@@ -271,6 +276,48 @@ TRANGE=trange
 	oR4 = oR4 -> Interpol(oE1)
 	
 ;-------------------------------------------
+; Filter Data //////////////////////////////
+;-------------------------------------------
+	dtB = oB1['TIMEVAR'] -> GetSI(RATE=fsB)
+	dtE = oE1['TIMEVAR'] -> GetSI(RATE=fsE)
+	dtV = oV1['TIMEVAR'] -> GetSI(RATE=fsV)
+	
+	IF fc GT 0 THEN BEGIN
+		fN = fsB / 2.0
+		f0 = 0.0
+		f1 = fc / fN
+		A  = 75
+		N  = Round(fsB)
+		oB1 = oB1 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=bf_vnames[0])
+		oB2 = oB2 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=bf_vnames[1])
+		oB3 = oB3 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=bf_vnames[2])
+		oB4 = oB4 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=bf_vnames[3])
+		
+		;Filter
+		fN = fsE / 2.0
+		f0 = 0.0
+		f1 = fc / fN
+		A  = 50
+		N  = Round(fsE)
+		oE1 = oE1 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=ef_vnames[0])
+		oE2 = oE2 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=ef_vnames[1])
+		oE3 = oE3 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=ef_vnames[2])
+		oE4 = oE4 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=ef_vnames[3])
+		
+		;Filter
+		fN = fsE / 2.0
+		f0 = 0.0
+		f1 = fc / fN
+		A  = 50
+		N  = Round(fsE)
+		oV1 = oV1 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=vf_vnames[0])
+		oV2 = oV2 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=vf_vnames[1])
+		oV3 = oV3 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=vf_vnames[2])
+		oV4 = oV4 -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=vf_vnames[3])
+	ENDIF
+	
+	
+;-------------------------------------------
 ; Barycentric Averages /////////////////////
 ;-------------------------------------------
 	;B
@@ -310,25 +357,9 @@ TRANGE=trange
 ;-------------------------------------------
 ; dB/dt ////////////////////////////////////
 ;-------------------------------------------
-	dt = oB_bary['TIMEVAR'] -> GetSI(RATE=fs)
-	
-	;Filter
-	IF fc GT 0 THEN BEGIN
-		fN = fs / 2.0
-		f0 = 0.0
-		f1 = fc / fN
-		A  = 75
-		N  = Round(fs)
-		oB_bary = oB_bary -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=bf_bary_vname)
-		oB_bary['COLOR']      = ['Blue', 'Forest Green', 'Red']
-		oB_bary['LABEL']      = 'B$\down' + ['X', 'Y', 'Z'] + '$'
-		oB_bary['PLOT_TITLE'] = 'Low pass filter fc=' + String(fc, FORMAT='(f0.1)')
-		oB_bary['TITLE']      = 'B$\downBC$!C(nT)'
-	ENDIF
-	
 	;dB/dt
 	;   - 1e-3 converts to uT/s = kg/Cs^2 * 1e6
-	dB_dt = -1e-3 * ( Double(oB_bary['DATA', 1:-1, *]) - Double(oB_bary['DATA', 0:-2, *]) ) / dt
+	dB_dt = -1e-3 * ( Double(oB_bary['DATA', 1:-1, *]) - Double(oB_bary['DATA', 0:-2, *]) ) / dtB
 	odB_bary_dt = MrVectorTS( (oB_bary['TIMEVAR'])[1:*], dB_dt )
 	
 	;Set properties
@@ -389,21 +420,6 @@ TRANGE=trange
 	oCurl['LABEL'] = '(' + nabla + 'xE)$\down' + ['X', 'Y', 'Z'] + '$'
 	oCurl['TITLE'] = nabla + 'xE!C($\mu$V/m^2)'
 	
-	;Filter
-	dt = oCurl['TIMEVAR'] -> GetSI(RATE=fs)
-	IF fc GT 0 THEN BEGIN
-		fN = fs / 2.0
-		f0 = 0.0
-		f1 = fc / fN
-		A  = 50
-		N  = Round(fs)
-		oCurl = oCurl -> Digital_Filter(f0, f1, A, N, /CACHE, NAME=curlEf_vname)
-		oCurl['COLOR']      = ['Blue', 'Forest Green', 'Red']
-		oCurl['LABEL']      = '(' + nabla + 'xE)$\down' + ['X', 'Y', 'Z'] + '$'
-		oCurl['PLOT_TITLE'] = 'Low pass filter fc=' + String(fc, FORMAT='(f0.1)')
-		oCurl['TITLE']      = nabla + 'xE!C($\mu$V/m^2)'
-	ENDIF
-	
 	;Attributes
 	oCurl['CATDESC'] = 'Curl(E)'
 	oCurl['COLOR']   = ['Blue', 'Forest Green', 'Red']
@@ -451,17 +467,17 @@ TRANGE=trange
 	
 	oGradVx['COLOR']     = 'Magenta'
 	oGradVx['LABEL']     = '(' + nabla + 'V)$\downX$'
-	oGradVx['LINESTYLE'] = '--'
+;	oGradVx['LINESTYLE'] = '--'
 	oGradVx['TITLE']     = 'E$\downX$!C(mV/m)'
 	
 	oGradVy['COLOR']     = 'Magenta'
 	oGradVy['LABEL']     = '(' + nabla + 'V)$\downY$'
-	oGradVy['LINESTYLE'] = '--'
+;	oGradVy['LINESTYLE'] = '--'
 	oGradVy['TITLE']     = 'E$\downY$!C(mV/m)'
 	
 	oGradVz['COLOR']     = 'Magenta'
 	oGradVz['LABEL']     = '(' + nabla + 'V)$\downZ$'
-	oGradVz['LINESTYLE'] = '--'
+;	oGradVz['LINESTYLE'] = '--'
 	oGradVz['TITLE']     = 'E$\downZ$!C(mV/m)'
 	
 	Obj_Destroy, oRecipVec
@@ -511,10 +527,89 @@ TRANGE=trange
 	win = MrVar_OPlotTS( ez_bary_vname, gradvz_vname )
 	
 	;Pretty-up the window
+	win.name = 'EMaxwell'
 	win[0] -> SetLayout, [1,1]
 	win    -> TrimLayout
 	win    -> SetProperty, OXMARGIN=[13, 11]
 	win    -> Refresh
+
+;-------------------------------------------
+; E vs. -Grad(V) ///////////////////////////
+;-------------------------------------------
+	;LADFIT variables
+;	px = LADFit(oGradVx['DATA'], oEx_bary['DATA'])
+;	py = LADFit(oGradVy['DATA'], oEy_bary['DATA'])
+;	pz = LADFit(oGradVz['DATA'], oEz_bary['DATA'])
+
+	;Scatter plots of Grad(V) and E_bary to view gain and offset parameters
+	w2 = MrWindow( ASPECT  = 1.0, $
+	               LAYOUT  = [3,1], $
+	               NAME    = 'EvGradV', $
+	               REFRESH = 0, $
+	               XSIZE   = 1000 )
+	p1 = MrVar_Plot( gradvx_vname, ex_bary_vname, $
+	                 XTITLE        = '(' + nabla + 'V)$\downX$ (mV/m)', $
+	                 XTICKINTERVAL = 0.04, $
+	                 YTITLE        = 'E$\downX$ (mV/m)', $
+	                 /CURRENT )
+;	p1f = MrPlot( oGradVx['DATA'], px[0] + px[1]*oGradVx['DATA'], $
+;	              COLOR    = 'Blue', $
+;	              OVERPLOT = p1 )
+	
+	p2 = MrVar_Plot( gradvy_vname, ey_bary_vname, $
+	                 XTITLE = '(' + nabla + 'V)$\downY$ (mV/m)', $
+	                 YTITLE = 'E$\downY$ (mV/m)', $
+	                 /CURRENT )
+	p3 = MrVar_Plot( gradvz_vname, ez_bary_vname, $
+	                 XTITLE = '(' + nabla + 'V)$\downZ$ (mV/m)', $
+	                 YTITLE = 'E$\downZ$ (mV/m)', $
+	                 /CURRENT )
+	p1 -> SetLayout, [1,1]
+	trange   = MrVar_GetTRange()
+	p2.title = StrJoin(StrSplit(StrMid(trange[0], 0, 19), 'T', /EXTRACT), ' ') + ' -- ' + StrMid(trange[1], 11, 8)
+	w2 -> TrimLayout
+	w2 -> Remove, w2 -> Get(/ALL, ISA='MrLegend')
+	w2 -> Refresh
+;	w2 -> Save, '/home/argall/figures/20151206/mms_edp_brst_l2_4sc-e-maxwell-gradv-scatter_20151206_233827_233836.png'
+
+;-------------------------------------------
+; Curl(E) vs. -dB/dt ///////////////////////
+;-------------------------------------------
+
+	;Scatter plots of -dB/dt and Curl(E) to view gain and offset parameters
+	oCurlEx = MrVar_Get(curlEx_vname)
+	oCurlEy = MrVar_Get(curlEy_vname)
+	oCurlEz = MrVar_Get(curlEz_vname)
+	w3 = MrWindow( ASPECT  = 1.0, $
+	               LAYOUT  = [3,1], $
+	               NAME    = 'CurlEvdBdt', $
+	               REFRESH = 0, $
+	               XSIZE   = 1000 )
+	p4 = MrVar_Plot( dBxdt_vname, oCurlEx[1:-1], $
+	                 TITLE         = '', $
+	                 XRANGE        = [-0.03,0.03], $
+	                 XTITLE        = '-'+partial+'B$\downX$/'+partial+'t ($\mu$T/s)', $
+	                 XTICKINTERVAL = 0.02, $
+	                 YTITLE        = nabla+'E$\downX$ ($\mu$V/m$\up2$)', $
+	                 /CURRENT )
+	p5 = MrVar_Plot( dBydt_vname, oCurlEy[1:-1], $
+	                 XRANGE = [-0.04, 0.01], $
+	                 XTITLE = '-'+partial+'B$\downY$/'+partial+'t ($\mu$T/s)', $
+	                 YTITLE = nabla+'E$\downZ$ ($\mu$V/m$\up2$)', $
+	                 /CURRENT )
+	p6 = MrVar_Plot( dBzdt_vname, oCurlEz[1:-1], $
+	                 TITLE  = '', $
+	                 XRANGE = [-0.04,0.01], $
+	                 XTITLE = '-'+partial+'B$\downZ$/'+partial+'t ($\mu$T/s)', $
+	                 YTITLE = nabla+'E$\downZ$ ($\mu$V/m$\up2$)', $
+	                 /CURRENT )
+	p4 -> SetLayout, [1,1]
+	trange   = MrVar_GetTRange()
+	p5.title = StrJoin(StrSplit(StrMid(trange[0], 0, 19), 'T', /EXTRACT), ' ') + ' -- ' + StrMid(trange[1], 11, 8)
+	w3 -> TrimLayout
+	w3 -> Remove, w3 -> Get(/ALL, ISA='MrLegend')
+	w3 -> Refresh
+;	w3 -> Save, '/home/argall/figures/20151206/mms_edp_brst_l2_4sc-e-maxwell-curlE-scatter_20151206_233827_233836.png'
 
 ;-------------------------------------------
 ; Save Figure //////////////////////////////

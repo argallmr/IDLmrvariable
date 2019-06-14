@@ -102,7 +102,6 @@ TRANGE=trange
 	edi_instr = 'edi'
 	edi_param = level EQ 'l2' ? 'flux' : 'counts'
 	
-	
 	;Find which optional descriptor is available
 	fnames = MrMMS_Get_Filenames(sc, edi_instr, mode, level)
 	MrMMS_Parse_Filename, fnames, OPTDESC=optdesc, VERSION=version
@@ -216,37 +215,31 @@ TRANGE=trange
 ;		oTheta = MrScalarTS(oVec['TIMEVAR']
 
 		oTraj = MrMMS_EDI_cart2sphr(oVec, /CACHE, NAME=fac_vnames[i])
-		oTraj['TITLE'] = '!9' + String(97B) + '!X$\downB$!C(deg)'
-		oTraj['UNITS'] = 'deg'
+		oTraj['TITLE']         = '!9' + String(97B) + '!X$\downB$!C(deg)'
+		oTraj['UNITS']         = 'deg'
+		oTraj['YTICKINTERVAL'] = 90.0
+		oTraj['YRANGE']        = [-180.0, 180.0]
 		Obj_Destroy, oVec
 	ENDFOR
+	
+;-------------------------------------------
+; Attributes ///////////////////////////////
+;-------------------------------------------
+	oCh1 = MrVar_Get(fac_vnames[0])
+	oCh2 = MrVar_Get(fac_vnames[1])
+	oCh3 = MrVar_Get(fac_vnames[2])
+	oCh4 = MrVar_Get(fac_vnames[3])
+	oCh1['PLOT_TITLE'] = 'Channel 1'
+	oCh2['PLOT_TITLE'] = 'Channel 2'
+	oCh3['PLOT_TITLE'] = 'Channel 3'
+	oCh4['PLOT_TITLE'] = 'Channel 4'
 
 ;-------------------------------------------
-; First Row ////////////////////////////////
+; Plot /////////////////////////////////////
 ;-------------------------------------------
 	;Plot burst data
 	win = MrVar_PlotTS( fac_vnames, LAYOUT=[4,4], XSIZE=1000, YSIZE=600, /NO_REFRESH )
-	
-	;Overplot survey data
-;	cts_brst_vname = reform( cts_brst_vname, 4, 4 )
 
-;	win = MrVar_OPlotTS( cts_brst_vname[*,0], cts_srvy_vname )
-;	win = MrVar_OPlotTS( cts_brst_vname[*,1], cts_srvy_vname )
-;	win = MrVar_OPlotTS( cts_brst_vname[*,2], cts_srvy_vname )
-;	win = MrVar_OPlotTS( cts_brst_vname[*,3], cts_srvy_vname )
-	
-	;Create a legend
-;	lgd = MrLegend( ALIGNMENT    = 'NW', $
-;	                LABEL        = ['Brst', 'Srvy'], $
-;	                LINESTYLE    = 6, $
-;	                POSITION     = [1.0, 1.0], $
-;	                /RELATIVE, $
-;	                SAMPLE_WIDTH = 0.0, $
-;	                TARGET       = win[cts_brst_vname[0,3]], $
-;	                TEXT_COLOR   = ['Black', 'Red'] )
-	
-;	win -> SetGlobal, YRANGE=[1,2000]
-;	win -> Refresh
 	win[0].SetLayout, [1,1]
 	win.TrimLayout
 	win -> Refresh

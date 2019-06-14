@@ -121,6 +121,13 @@ TRANGE=trange
 ;-------------------------------------------
 ; Variable Names ///////////////////////////
 ;-------------------------------------------
+	;FSM
+	IF instr EQ 'fsm' && mode NE 'brst' THEN Message, 'FSM data is only available in burst mode.'
+	fsm_optdesc = '8khz'
+	fsm_level   = 'l3'
+	fsm_mode    = 'brst'
+	fsm_coords  = coords
+	
 	;FGM parameters
 	IF N_Elements(fgm_instr) EQ 0 THEN fgm_instr = (instr NE 'scm' && instr NE 'edp') ? instr : 'fgm'
 	fgm_coords = (coords EQ 'dsl'  || coords EQ 'dbcs') ? 'dmpa' : coords
@@ -143,7 +150,7 @@ TRANGE=trange
 	;EDP
 	edp_coords = (coords EQ 'dmpa' || coords EQ 'dbcs') ? 'dsl' : coords
 	edp_mode   = mode EQ 'srvy' ? 'fast' : mode
-	IF mode EQ 'srvy' THEN MrPrintF, 'LogErr', 'EDP does not have srvy data. Using fast.'
+	IF mode EQ 'srvy' THEN MrPrintF, 'LogWarn', 'EDP does not have srvy data. Using fast.'
 	
 	;FPI
 	fpi_coords = (coords EQ 'dmpa' || coords EQ 'dsl') ? 'dbcs' : coords
@@ -153,7 +160,8 @@ TRANGE=trange
 	b_vname    = StrJoin( [sc, fgm_instr, 'b',    fgm_coords,              fgm_mode, level], '_' )
 	bvec_vname = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords,              fgm_mode, level], '_' )
 	bmag_vname = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords,              fgm_mode, level], '_' )
-	dcb_vname  = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords,              fgm_mode, level], '_' )
+	bfsm_vname = StrJoin( [sc, 'fsm',     'b',    fsm_coords,              fsm_mode, fsm_level], '_') 
+	dcb_vname  = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords,              fgm_mode, level], '_' )
 	acb_vname  = StrJoin( [sc, 'scm',     'acb',  scm_coords, scm_optdesc, scm_mode, level], '_' )
 	dce_vname  = StrJoin( [sc, 'edp',     'dce',  edp_coords,              edp_mode, level], '_' )
 	ni_vname   = StrJoin( [sc, 'dis',     'numberdensity',                 fpi_mode], '_' )
@@ -162,7 +170,8 @@ TRANGE=trange
 	CASE instr OF
 		'edp': field_vname = dce_vname
 		'scm': field_vname = acb_vname
-		ELSE:  field_vname = dcb_Vname
+		'fsm': field_vname = fsm_vname
+		ELSE:  field_vname = dcb_vname
 	ENDCASE
 	
 	;Output names
@@ -181,7 +190,6 @@ TRANGE=trange
 ; Get Data /////////////////////////////////
 ;-------------------------------------------
 	IF tf_load THEN BEGIN
-		
 		;SCM
 		IF instr EQ 'scm' THEN BEGIN
 			MrMMS_Load_Data, sc, 'scm', mode, level, $
@@ -189,23 +197,28 @@ TRANGE=trange
 	
 		;EDP
 		ENDIF ELSE IF instr EQ 'edp' THEN BEGIN
-			MrMMS_Load_Data, sc, 'edp', mode, level, $
+			MrMMS_Load_Data, sc, 'edp', edp_mode, level, $
 			                 OPTDESC   = 'dce', $
 			                 VARFORMAT = dce_vname
 		
+		;FSM
+		ENDIF ELSE IF instr EQ 'fsm' THEN BEGIN
+			MrMMS_Load_Data, sc, 'fsm', fsm_mode, fsm_level, $
+			                 OPTDESC   = fsm_optdesc, $
+			                 VARFORMAT = '*_b_'+fsm_coords+'_'+fsm_mode+'*'
+		
 		;FGM
 		ENDIF ELSE IF instr NE fgm_instr THEN BEGIN
-			MrMMS_FGM_Load_Data, sc, mode, $
-			                     VARFORMAT = '*b_'+coords+'*'+level
+			MrMMS_FGM_Load_Data, sc, fgm_mode, $
+			                     VARFORMAT = '*b_'+fgm_coords+'*'+level
 		ENDIF
 		
-		
 		;|B|
-		MrMMS_FGM_Load_Data, sc, mode, $
-		                     VARFORMAT = '*b_'+coords+'*'+level
+		MrMMS_FGM_Load_Data, sc, fgm_mode, $
+		                     VARFORMAT = '*b_'+fgm_coords+'*'+level
 		
 		;DENSITY
-		MrMMS_FPI_Load_Data, sc, mode, $
+		MrMMS_FPI_Load_Data, sc, fpi_mode, $
 		                     OPTDESC   = ['des-moms', 'dis-moms'], $
 		                     VARFORMAT = '*numberdensity_'+fpi_mode
 	ENDIF
@@ -278,7 +291,12 @@ TRANGE=trange
 		;DELTA
 		odV['TITLE'] = 'dB!C(nT)'
 		odV['LABEL'] = 'dB$\down' + ['X', 'Y', 'Z'] + '$'
-	ENDIF
+	
+	;FGM
+	ENDIF ELSE BEGIN
+		odV['TITLE'] = 'dB!C(nT)'
+		odV['LABEL'] = 'dB$\down' + ['X', 'Y', 'Z'] + '$'
+	ENDELSE
 	
 	;X PSD
 	oSpec_X -> SetName, psd_x_vname
@@ -354,8 +372,8 @@ TRANGE=trange
 		IF StRegEx(lgds[i].name, 'f(ce|ci|pe|pi|lh)', /BOOLEAN) THEN BEGIN
 			lgds[i] -> SetProperty, ALIGNMENT  ='NE', $
 			                        COLOR      = 'Black', $
-			                        FILL_COLOR ='Light Grey', $
-			                        LINESTYLE  ='-'
+			                        FILL_COLOR = 'Light Grey', $
+			                        LINESTYLE  = '-'
 		ENDIF
 	ENDFOR
 	
@@ -373,7 +391,8 @@ TRANGE=trange
 			THEN output_dir = FilePath( '', ROOT_DIR=File_Search('~', /TEST_DIRECTORY), SUBDIRECTORY='figures' )
 		
 		;File name
-		fname = StrJoin( [sc, instr, mode, level, 'power-spectrogram'], '_' )
+		optdesc = 'n' + String(nfft, FORMAT='(i0)') + '-ns' + String(nshift, FORMAT='(i0)')
+		fname = StrJoin( [sc, instr, mode, level, 'psd-'+optdesc], '_' )
 		fname = FilePath( fname, ROOT_DIR=output_dir )
 		
 		;Save the figure

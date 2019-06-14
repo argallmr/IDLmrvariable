@@ -1,7 +1,7 @@
 ; docformat = 'rst'
 ;
 ; NAME:
-;       MrMMS_Plot_FPI_CalcMoms
+;       MrMMS_Plot_FPI_Moms_Compare
 ;
 ;*****************************************************************************************
 ;   Copyright (c) 2017, Matthew Argall                                                   ;
@@ -73,7 +73,7 @@
 ;   Modification History::
 ;       2017/02/07  -   Written by Matthew Argall
 ;-
-FUNCTION MrMMS_Plot_FPI_CalcMoms, sc, mode, species, $
+FUNCTION MrMMS_Plot_FPI_Moms_Compare, sc, mode, species, $
 COORDS=coords, $
 FGM_INSTR=fgm_instr, $
 LEVEL=level, $

@@ -118,7 +118,7 @@ TRANGE=trange
 		THEN Message, 'Invalid value for instr: "' + instr + '".'
 	
 ;-------------------------------------------
-; Get Data /////////////////////////////////
+; Variable Name Parameters /////////////////
 ;-------------------------------------------
 	;FGM parameters
 	IF N_Elements(fgm_instr) EQ 0 THEN fgm_instr = (instr NE 'edp' && instr NE 'scm') ? instr : 'fgm'
@@ -151,6 +151,10 @@ TRANGE=trange
 	;FPI Parameters
 	fpi_mode    = mode EQ 'brst' ? mode : 'fast'
 	fpi_optdesc = level EQ 'ql' ? 'des' : 'des-moms'
+	
+;-------------------------------------------
+; Get Data /////////////////////////////////
+;-------------------------------------------
 	
 	;Load the data
 	IF tf_load THEN BEGIN

@@ -64,6 +64,7 @@
 ; :History:
 ;   Modification History::
 ;       2018/03/08  -   Written by Matthew Argall
+;       2018/06/29  -   Convert azimuth angle to degrees
 ;-
 FUNCTION MrMMS_EDI_cart2sphr, vec, $
 CACHE=cache, $
@@ -75,7 +76,7 @@ NAME=name
 	
 	;Convert to angles
 	polar   = ACos(oVec['DATA',*,2]) * 180D / !dpi
-	azimuth = ATan(oVec['DATA',*,1], oVec['DATA',*,0])
+	azimuth = ATan(oVec['DATA',*,1], oVec['DATA',*,0]) * 180.0 / !dpi
 	
 	;Create vector
 	oTraj = MrTimeSeries( oVec['TIMEVAR'], Float([ [azimuth], [polar] ]), $
@@ -86,6 +87,7 @@ NAME=name
 	oTraj['AXIS_RANGE'] = [-180.0, 180.0]
 	oTraj['COLOR']      = ['Red', 'Blue']
 	oTraj['LABEL']      = ['$\phi$', '$\theta$']
+	oTraj['UNITS']      = 'deg'
 	
 	RETURN, oTraj
 END

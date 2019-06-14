@@ -162,12 +162,12 @@ TRANGE=trange
 	b_vname     = StrJoin( [sc, fgm_instr, 'b',    fgm_coords, fgm_mode, fgm_level], '_' )
 	bvec_vname  = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords, fgm_mode, fgm_level], '_' )
 	bmag_vname  = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords, fgm_mode, fgm_level], '_' )
-	edp_vname   = ''
-	scm_vname   = ''
-	bxpsd_vname = StrJoin( [sc, 'dsp', 'bpsd', 'scm1'], '_' );, mode, level], '_' )
-	bypsd_vname = StrJoin( [sc, 'dsp', 'bpsd', 'scm2'], '_' );, mode, level], '_' )
-	bzpsd_vname = StrJoin( [sc, 'dsp', 'bpsd', 'scm3'], '_' );, mode, level], '_' )
-	bpsd_vname  = StrJoin( [sc, 'dsp', 'bpsd', 'omni'], '_' );, mode, level], '_' )
+	e_edp_vname = ''
+	b_scm_vname = StrJoin( [sc, 'scm', 'acb', coords, 'scb', mode, level], '_' )
+	bxpsd_vname = StrJoin( [sc, 'dsp', 'bpsd', 'scm1', mode, level], '_' )
+	bypsd_vname = StrJoin( [sc, 'dsp', 'bpsd', 'scm2', mode, level], '_' )
+	bzpsd_vname = StrJoin( [sc, 'dsp', 'bpsd', 'scm3', mode, level], '_' )
+	bpsd_vname  = StrJoin( [sc, 'dsp', 'bpsd', 'omni', mode, level], '_' )
 	expsd_vname = StrJoin( [sc, 'dsp', 'epsd', 'x'], '_' )
 	eypsd_vname = StrJoin( [sc, 'dsp', 'epsd', 'y'], '_' )
 	ezpsd_vname = StrJoin( [sc, 'dsp', 'epsd', 'z'], '_' )
@@ -275,18 +275,16 @@ TRANGE=trange
 			THEN vname = e_edp_vname $
 			ELSE vname = b_scm_vname
 		
-		;Output name
-		omni_vname = instr EQ 'edp' ? epsd_edp_omni_vname : bpsd_scm_omni_vname
-		
 		;Compute the Spectrogram
 		oV    = MrVar_Get(vname)
 		oSpec = oV -> Spectrogram( 4096, 2048, WINDOW='Hamming' )
 		
 		;Omni-Directional spectrogram
-		oOmni  = oSpec[*,*,1] + oSpec[*,*,2] + oSpec[*,*,3]
+		oOmni  = oSpec[*,*,0] + oSpec[*,*,1] + oSpec[*,*,2]
 		oOmni -> SetName, omni_hi_vname
 		oOmni -> Cache
-	
+		oSpec -> CopyAttrTo, oOmni
+		
 	;SRVY
 	ENDIF ELSE BEGIN
 		omni_hi_vname = instr EQ 'edp' ? epsd_vname : bpsd_vname
@@ -334,7 +332,7 @@ TRANGE=trange
 ;-------------------------------------------
 	;BMAG
 	oB = MrVar_Get(b_vname)
-	oB['AXIS_RANGE'] = [oB.min > -100, oB.max < 100]
+	oB['AXIS_RANGE'] = [oB.min > (-100), oB.max < 100]
 	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, mode, level], ' ' ) )
 	
 	;Omin Lo

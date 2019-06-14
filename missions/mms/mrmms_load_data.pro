@@ -345,5 +345,5 @@ _REF_EXTRA=extra
 ;-----------------------------------------------------
 ; Rename the Epoch Variables \\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
-	MrMMS_Load_Data_RenameEpoch, varnames, suffix
+;	MrMMS_Load_Data_RenameEpoch, varnames, suffix
 end

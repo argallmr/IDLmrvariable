@@ -73,10 +73,13 @@
 ; :History:
 ;   Modification History::
 ;       2017/01/17  -   Written by Matthew Argall
+;       2018/10/10  -   Added the TEAM_SITE keyword. Fast and slow survey data are
+;                           plotted together of MODE='srvy'. - MRA
 ;-
 FUNCTION MrMMS_Plot_DSP, sc, mode, $
 FGM_INSTR=fgm_instr, $
 NO_LOAD=no_load, $
+TEAM_SITE=team_site, $
 TRANGE=trange
 	Compile_Opt idl2
 	
@@ -89,15 +92,19 @@ TRANGE=trange
 	ENDIF
 	
 	tf_load = ~Keyword_Set(no_load)
+	IF N_Elements(level)     EQ 0 THEN level      = 'l2'
 	IF N_Elements(mode)      EQ 0 THEN mode       = 'fast'
 	IF N_Elements(fgm_instr) EQ 0 THEN fgm_instr  = 'fgm'
 	IF N_Elements(trange)    GT 0 THEN MrVar_SetTRange, trange
 	
 ;-------------------------------------------
-; Variable Names ///////////////////////////
+; Instrument Parameters ////////////////////
 ;-------------------------------------------
-	instr    = 'dsp'
-	level    = 'l2'
+	;DSP
+	dsp_instr = 'dsp'
+	dsp_mode  = mode EQ 'srvy' ? ['fast', 'slow'] : mode
+		
+	;FGM
 	fgm_mode = 'srvy'
 	CASE fgm_instr OF
 		'afg': fgm_level = 'l2pre'
@@ -109,23 +116,41 @@ TRANGE=trange
 		'ql': fgm_coords = 'dmpa'
 		ELSE: fgm_coords = 'gse'
 	ENDCASE
+	
+;-------------------------------------------
+; Variable Names ///////////////////////////
+;-------------------------------------------
 
 	;Source names
 	b_vname    = StrJoin( [sc, fgm_instr, 'b',    fgm_coords, fgm_mode, fgm_level], '_' )
 	bvec_vname = StrJoin( [sc, fgm_instr, 'bvec', fgm_coords, fgm_mode, fgm_level], '_' )
 	bmag_vname = StrJoin( [sc, fgm_instr, 'bmag', fgm_coords, fgm_mode, fgm_level], '_' )
 	
-	;Output names
-	bxpsd_vname = StrJoin( [sc, instr, 'bpsd', 'scm1', mode, level], '_' )
-	bypsd_vname = StrJoin( [sc, instr, 'bpsd', 'scm2', mode, level], '_' )
-	bzpsd_vname = StrJoin( [sc, instr, 'bpsd', 'scm3', mode, level], '_' )
-	bpsd_vname  = StrJoin( [sc, instr, 'bpsd', 'omni', mode, level], '_' )
-	expsd_vname = StrJoin( [sc, instr, 'epsd', 'x'], '_' )
-	eypsd_vname = StrJoin( [sc, instr, 'epsd', 'y'], '_' )
-	ezpsd_vname = StrJoin( [sc, instr, 'epsd', 'z'], '_' )
-	epsd_vname  = StrJoin( [sc, instr, 'epsd', 'omni'], '_' )
-	fce_vname   = StrJoin( [sc, instr, 'fce',      mode, level], '_' )
-	fce_2_vname = StrJoin( [sc, instr, 'halffce',  mode, level], '_' )
+	bxpsd_vname = StrJoin( [sc, dsp_instr, 'bpsd', 'scm1', dsp_mode[0], level], '_' )
+	bypsd_vname = StrJoin( [sc, dsp_instr, 'bpsd', 'scm2', dsp_mode[0], level], '_' )
+	bzpsd_vname = StrJoin( [sc, dsp_instr, 'bpsd', 'scm3', dsp_mode[0], level], '_' )
+	bpsd_vname  = StrJoin( [sc, dsp_instr, 'bpsd', 'omni', dsp_mode[0], level], '_' )
+	
+	expsd_vname = StrJoin( [sc, dsp_instr, 'epsd', 'x', dsp_mode[0], level], '_' )
+	eypsd_vname = StrJoin( [sc, dsp_instr, 'epsd', 'y', dsp_mode[0], level], '_' )
+	ezpsd_vname = StrJoin( [sc, dsp_instr, 'epsd', 'z', dsp_mode[0], level], '_' )
+	epsd_vname  = StrJoin( [sc, dsp_instr, 'epsd', 'omni', dsp_mode[0], level], '_' )
+	
+	IF mode EQ 'srvy' THEN BEGIN
+		bxpsd_slow_vname = StrJoin( [sc, dsp_instr, 'bpsd', 'scm1', dsp_mode[1], level], '_' )
+		bypsd_slow_vname = StrJoin( [sc, dsp_instr, 'bpsd', 'scm2', dsp_mode[1], level], '_' )
+		bzpsd_slow_vname = StrJoin( [sc, dsp_instr, 'bpsd', 'scm3', dsp_mode[1], level], '_' )
+		bpsd_slow_vname  = StrJoin( [sc, dsp_instr, 'bpsd', 'omni', dsp_mode[1], level], '_' )
+	
+		expsd_slow_vname = StrJoin( [sc, dsp_instr, 'epsd', 'x', dsp_mode[1], level], '_' )
+		eypsd_slow_vname = StrJoin( [sc, dsp_instr, 'epsd', 'y', dsp_mode[1], level], '_' )
+		ezpsd_slow_vname = StrJoin( [sc, dsp_instr, 'epsd', 'z', dsp_mode[1], level], '_' )
+		epsd_slow_vname  = StrJoin( [sc, dsp_instr, 'epsd', 'omni', dsp_mode[1], level], '_' )
+	ENDIF
+	
+	;Derived names
+	fce_vname   = StrJoin( [sc, dsp_instr, 'fce',      mode, level], '_' )
+	fce_2_vname = StrJoin( [sc, dsp_instr, 'halffce',  mode, level], '_' )
 
 ;-------------------------------------------
 ; Get Data /////////////////////////////////
@@ -135,34 +160,61 @@ TRANGE=trange
 		MrMMS_FGM_Load_Data, sc, fgm_mode, $
 		                     INSTR     = fgm_instr, $
 		                     LEVEL     = fgm_level, $
+		                     TEAM_SITE = team_site, $
 		                     VARFORMAT = b_vname
 		
 		;BPSD
-		MrMMS_Load_Data, sc, instr, mode, level, $
+		MrMMS_Load_Data, sc, dsp_instr, dsp_mode, level, $
 		                 OPTDESC   = 'bpsd', $
-		                 VARFORMAT = [bxpsd_vname, bypsd_vname, bzpsd_vname, bpsd_vname]
+		                 TEAM_SITE = team_site, $
+		                 VARFORMAT = ['*bpsd_scm*', '*bpsd_omni*']
 		
 		;ESPD
-		MrMMS_Load_Data, sc, instr, mode, level, $
+		MrMMS_Load_Data, sc, dsp_instr, dsp_mode[0], level, $
 		                 OPTDESC   = 'epsd', $
-		                 VARFORMAT = [expsd_vname, eypsd_vname, ezpsd_vname, epsd_vname]
+		                 SUFFIX    = '_' + dsp_mode[0] + '_' + level, $
+		                 TEAM_SITE = team_site, $
+		                 VARFORMAT = '*epsd*'
+		 
+		IF mode EQ 'srvy' THEN BEGIN
+			MrMMS_Load_Data, sc, dsp_instr, dsp_mode[1], level, $
+			                 OPTDESC   = 'epsd', $
+			                 SUFFIX    = '_' + dsp_mode[1] + '_' + level, $
+			                 TEAM_SITE = team_site, $
+			                 VARFORMAT = '*epsd*'
+		ENDIF
 	ENDIF
-
+	
 ;-------------------------------------------
 ; Gyrofrequency Lines //////////////////////
 ;-------------------------------------------
-	oBmag  = MrVar_Get(bmag_vname)
-	ofce   = MrVar_Freq_Cyclotron(oBmag, 'm_e',  /CACHE, NAME=fce_vname)
-	ofce_2 = ofce / 2.0
-	ofce_2 -> SetName, fce_2_vname
-	ofce_2 -> Cache
+	tf_fce = MrVar_IsCached(b_vname)
+	IF tf_fce THEN BEGIN
+		oBmag  = MrVar_Get(bmag_vname)
+		ofce   = MrVar_Freq_Cyclotron(oBmag, 'm_e',  /CACHE, NAME=fce_vname)
+		ofce_2 = ofce / 2.0
+		ofce_2 -> SetName, fce_2_vname
+		ofce_2 -> Cache
+		
+		;BMAG
+		oB = MrVar_Get(b_vname)
+		oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, instr, mode, level], ' ' ) )
+	
+		;FCE
+		ofce['COLOR']     = 'White'
+		ofce['LINESTYLE'] = '--'
+		ofce['NSUM']      = 4
+	
+		;FCE_2
+		ofce_2['COLOR']      = 'Magenta'
+		ofce_2['LINESTYLE'] = '.'
+		ofce_2['NSUM']      = 4
+		ofce_2['UNITS']     = 'Hz'
+	ENDIF
 	
 ;-------------------------------------------
 ; Properties ///////////////////////////////
 ;-------------------------------------------
-	;BMAG
-	oB = MrVar_Get(b_vname)
-	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, instr, mode, level], ' ' ) )
 	
 	;FREQUENCY
 	;   - DELTA_(MINUS|PLUS) does not have the correct number of elements.
@@ -218,17 +270,6 @@ TRANGE=trange
 	oEo['AXIS_RANGE'] = [1e-15, 1e-10]
 	oEo['LOG']        = 1
 	oEo['TITLE']     = 'PSD!CE Omni'
-	
-	;FCE
-	ofce['COLOR']     = 'White'
-	ofce['LINESTYLE'] = '--'
-	ofce['NSUM']      = 4
-	
-	;FCE_2
-	ofce_2['COLOR']      = 'Magenta'
-	ofce_2['LINESTYLE'] = '.'
-	ofce_2['NSUM']      = 4
-	ofce_2['UNITS']     = 'Hz'
 
 ;-------------------------------------------
 ; Plot Data ////////////////////////////////
@@ -239,20 +280,37 @@ TRANGE=trange
 	                    /NO_REFRESH, $
 	                    XSIZE = 680, $
 	                    YSIZE = 700 )
-	win = MrVar_OPlotTS( bxpsd_vname, [fce_vname, fce_2_vname] )
-	win = MrVar_OPlotTS( bypsd_vname, [fce_vname, fce_2_vname] )
-	win = MrVar_OPlotTS( bzpsd_vname, [fce_vname, fce_2_vname] )
-	win = MrVar_OPlotTS( bpsd_vname,  [fce_vname, fce_2_vname] )
-	win = MrVar_OPlotTS( expsd_vname, [fce_vname, fce_2_vname] )
-	win = MrVar_OPlotTS( eypsd_vname, [fce_vname, fce_2_vname] )
-	win = MrVar_OPlotTS( ezpsd_vname, [fce_vname, fce_2_vname] )
-	win = MrVar_OPlotTS( epsd_vname,  [fce_vname, fce_2_vname] )
+	
+	;Slow survey
+	IF mode EQ 'srvy' THEN BEGIN
+		win = MrVar_OPlotTS( bxpsd_vname, bxpsd_slow_vname )
+		win = MrVar_OPlotTS( bypsd_vname, bypsd_slow_vname )
+		win = MrVar_OPlotTS( bzpsd_vname, bzpsd_slow_vname )
+		win = MrVar_OPlotTS( bpsd_vname,  bpsd_slow_vname )
+		
+		win = MrVar_OPlotTS( expsd_vname, expsd_slow_vname )
+		win = MrVar_OPlotTS( eypsd_vname, eypsd_slow_vname )
+		win = MrVar_OPlotTS( ezpsd_vname, ezpsd_slow_vname )
+		win = MrVar_OPlotTS( epsd_vname,  epsd_slow_vname )
+	ENDIF
+	
+	;Gyrofrequency lines
+	IF tf_fce THEN BEGIN
+		win = MrVar_OPlotTS( bxpsd_vname, [fce_vname, fce_2_vname] )
+		win = MrVar_OPlotTS( bypsd_vname, [fce_vname, fce_2_vname] )
+		win = MrVar_OPlotTS( bzpsd_vname, [fce_vname, fce_2_vname] )
+		win = MrVar_OPlotTS( bpsd_vname,  [fce_vname, fce_2_vname] )
+		win = MrVar_OPlotTS( expsd_vname, [fce_vname, fce_2_vname] )
+		win = MrVar_OPlotTS( eypsd_vname, [fce_vname, fce_2_vname] )
+		win = MrVar_OPlotTS( ezpsd_vname, [fce_vname, fce_2_vname] )
+		win = MrVar_OPlotTS( epsd_vname,  [fce_vname, fce_2_vname] )
+	ENDIF
 
 	;Pretty-up the window
 	win[0] -> SetLayout, [1,1]
 	win    -> TrimLayout
 	win    -> SetProperty, OXMARGIN=[13, 14]
 	win    -> Refresh
-
+	
 	RETURN, win
 END

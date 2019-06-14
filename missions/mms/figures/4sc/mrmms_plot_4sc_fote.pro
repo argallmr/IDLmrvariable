@@ -98,6 +98,8 @@ TRANGE=trange
 		RETURN, !Null
 	ENDIF
 	
+	RE2km = 1e-3 * MrConstants('RE')
+	sc_colors = ['Black', 'Red', 'Forest Green', 'Blue']
 	tf_load = ~Keyword_Set(no_load)
 	IF N_Elements(trange)  GT 0 THEN MrVar_SetTRange, trange
 	
@@ -145,6 +147,7 @@ TRANGE=trange
 		ELSE r_vnames    = StrUpCase(sc) + '_' + StrUpCase(ephdesc) + '_' + 'R'
 	
 	;Output names
+	r_interp_vnames = sc + '_' + StrJoin( ['mec', 'r', 'interp', coords], '_' )
 	b1_vnames     = [ bmag_vnames[0], bvec_vnames[0] + '_' + ['x', 'y', 'z'] ]
 	b2_vnames     = [ bmag_vnames[1], bvec_vnames[1] + '_' + ['x', 'y', 'z'] ]
 	b3_vnames     = [ bmag_vnames[2], bvec_vnames[2] + '_' + ['x', 'y', 'z'] ]
@@ -156,10 +159,19 @@ TRANGE=trange
 	rx_null_vname = r_null_vname + '_x'
 	ry_null_vname = r_null_vname + '_y'
 	rz_null_vname = r_null_vname + '_z'
+	r_null_bary_vname  = StrJoin( ['mms', 'ephem', 'R', 'null', 'barycenter', mode, level], '_' )
+	rx_null_bary_vname = r_null_bary_vname + '_x'
+	ry_null_bary_vname = r_null_bary_vname + '_y'
+	rz_null_bary_vname = r_null_bary_vname + '_z'
 	pi_vname      = StrJoin( ['mms', instr, 'pi', mode, level], '_' )
 	r_plus_vname  = StrJoin( ['mms', 'ephem', 'dr', 'plus',  mode, level], '_' )
 	r_minus_vname = StrJoin( ['mms', 'ephem', 'dr', 'minus', mode, level], '_' )
-	dr_mean_vname  = StrJoin( ['mms', 'ephem', 'dr', 'mean',  mode, level], '_' )
+	dr_mean_vname = StrJoin( ['mms', 'ephem', 'dr', 'mean',  mode, level], '_' )
+	r_bary_vnames  = sc + StrJoin( ['mms', 'ephem', 'dr', 'bary',  mode, level], '_' )
+	rx_bary_vnames = r_bary_vnames + '_x'
+	ry_bary_vnames = r_bary_vnames + '_y'
+	rz_bary_vnames = r_bary_vnames + '_z'
+	
 	
 ;-------------------------------------------
 ; Get Data /////////////////////////////////
@@ -196,8 +208,19 @@ TRANGE=trange
 	oRnull = oFGM -> FOTE(/CACHE, ERR=oErr, NAME=r_null_vname, RMAG=oRmag)
 	
 	;Rmin
-	Rmin = Min(oRmag['DATA'], DIMENSION=2)
+	Rmin  = Min(oRmag['DATA'], DIMENSION=2)
 	oRmin = MrScalarTS(oRmag['TIMEVAR'], Rmin, /CACHE, NAME=rmin_null_vname)
+	oRmin['AXIS_RANGE']   = [1, 1.5e3]
+	oRmin['LOG']          = 1B
+	oRmin['SYMBOL']       = oRmag['SYMBOL']
+	oRmin['TICKINTERVAL'] = 500
+	oRmin['TITLE']        = 'Rmin!C(km)'
+	
+	;Rmag
+	oRmag['AXIS_RANGE'] = [1e0, 5e3]
+	oRmag['LABEL']      = ['mms1', 'mms2', 'mms3', 'mms4']
+	oRmag['LOG']        = 1B
+	oRmag -> RemoveAttr, 'SYMBOL'
 	
 	;Rxyz
 	oRnull -> Split, oRx_null, oRy_null, oRz_null, /CACHE
@@ -206,19 +229,90 @@ TRANGE=trange
 ;	oPI = oFGM -> Poincare(NAME=pi_vname, /CACHE)
 
 ;-------------------------------------------
-; Spacecraft Position //////////////////////
+; Separation ///////////////////////////////
 ;-------------------------------------------
 	oR1 = MrVar_Get(r_vnames[0])
-	oR2 = MrVar_Get(r_vnames[1])
-	oR3 = MrVar_Get(r_vnames[2])
-	oR4 = MrVar_Get(r_vnames[3])
+	oR1 = oR1 -> Copy(r_interp_vnames[0], /CACHE)
+	oT = oR1['TIMEVAR']
+	FOR i = 1, N_Elements(sc) - 1 DO BEGIN
+		oPos = MrVar_Get(r_vnames[i])
+		oPos = oPos -> Interpol(oT, /CACHE, NAME=r_interp_vnames[i])
+	ENDFOR
 	
-	oR2 = oR2 -> Interpol(oR1)
-	oR3 = oR3 -> Interpol(oR1)
-	oR4 = oR4 -> Interpol(oR1)
-	
-	;Barycenter
+	;Position of barycenter (km)
+	oR1 = MrVar_Get(r_interp_vnames[0])
+	oR2 = MrVar_Get(r_interp_vnames[1])
+	oR3 = MrVar_Get(r_interp_vnames[2])
+	oR4 = MrVar_Get(r_interp_vnames[3])
 	oRbary = (oR1 + oR2 + oR3 + oR4) / 4.0
+	
+	;Mean separation
+	odR12 = (oR2 - oR1) -> Magnitude()
+	odR13 = (oR2 - oR1) -> Magnitude()
+	odR14 = (oR2 - oR1) -> Magnitude()
+	odR23 = (oR3 - oR2) -> Magnitude()
+	odR24 = (oR3 - oR2) -> Magnitude()
+	odR34 = (oR4 - oR3) -> Magnitude()
+	dr_mean = Mean( [ [odR12['DATA']], [odR12['DATA']], [odR12['DATA']], $
+	                  [odR12['DATA']], [odR12['DATA']], [odR12['DATA']] ] )
+
+;-------------------------------------------
+; Barycenter Coordinates ///////////////////
+;-------------------------------------------
+	
+	;Spacecraft position with respect to barycenter
+	FOR i = 0, N_Elements(sc) - 1 DO BEGIN
+		oPos     = MrVar_Get(r_interp_vnames[i])
+		odR_bary = oPos - oRbary
+		odR_bary -> SetName, r_bary_vnames[i]
+		odR_bary -> Cache
+		
+		;Components
+		odR_bary -> Split, odRx_bary, odRy_bary, odRz_bary, /CACHE
+		
+		;Attributes
+		odRx_bary['COLOR'] = sc_colors[i]
+		odRy_bary['COLOR'] = sc_colors[i]
+		odRz_bary['COLOR'] = sc_colors[i]
+	ENDFOR
+		
+	;Null
+	oRbary = oRbary -> Interpol(oRnull)
+	odRnull_bary = Re2km*oRnull - oRbary
+	odRnull_bary -> SetName, r_null_bary_vname
+	odRnull_bary -> Cache
+	
+	;Components
+	rbc_range = 1.5 * [-dr_mean, dr_mean]
+	odRnull_bary -> Split, odRxnull_bary, odRynull_bary, odRznull_bary, /CACHE
+	odRxnull_bary['AXIS_RANGE']    = rbc_range
+	odRxnull_bary['CATDESC']       = 'Distance to null from barycenter.'
+	odRxnull_bary['LINESTYLE']     = 'None'
+	odRxnull_bary['SYMBOL']        = 1
+	odRxnull_bary['TITLE']         = 'Rx$\downBC$!C(km)'
+	odRxnull_bary['UNITS']         = 'km'
+	odRxnull_bary['SI_CONVERSION'] = '1e3>m'
+	
+	odRynull_bary['AXIS_RANGE']    = rbc_range
+	odRynull_bary['CATDESC']       = 'Distance to null from barycenter.'
+	odRynull_bary['LINESTYLE']     = 'None'
+	odRynull_bary['SYMBOL']        = 1
+	odRynull_bary['TITLE']         = 'Ry$\downBC$!C(km)'
+	odRynull_bary['UNITS']         = 'km'
+	odRynull_bary['SI_CONVERSION'] = '1e3>m'
+	
+	odRznull_bary['AXIS_RANGE']    = rbc_range
+	odRznull_bary['CATDESC']       = 'Distance to null from barycenter.'
+	odRznull_bary['LINESTYLE']     = 'None'
+	odRznull_bary['SYMBOL']        = 1
+	odRznull_bary['TITLE']         = 'Rz$\downBC$!C(km)'
+	odRznull_bary['UNITS']         = 'km'
+	odRznull_bary['SI_CONVERSION'] = '1e3>m'
+	
+	
+;-------------------------------------------
+; Ranges of the Spacecraft Positions //////
+;-------------------------------------------
 	
 	;Deltas on barycenter
 	r_plus = Max( [ [[oR1['DATA']]], [[oR2['DATA']]], [[oR3['DATA']]], [[oR4['DATA']]] ], $
@@ -235,33 +329,6 @@ TRANGE=trange
 	                       /CACHE, $
 	                       NAME = r_minus_vname, $
 	                       /NO_COPY )
-	
-	;Mean separation
-	odR12 = (oR2 - oR1) -> Magnitude()
-	odR13 = (oR2 - oR1) -> Magnitude()
-	odR14 = (oR2 - oR1) -> Magnitude()
-	odR23 = (oR3 - oR2) -> Magnitude()
-	odR24 = (oR3 - oR2) -> Magnitude()
-	odR34 = (oR4 - oR3) -> Magnitude()
-	dr_mean = Mean( [ [odR12['DATA']], [odR12['DATA']], [odR12['DATA']], $
-	                  [odR12['DATA']], [odR12['DATA']], [odR12['DATA']] ] )
-	
-;-------------------------------------------
-; Properties ///////////////////////////////
-;-------------------------------------------
-	
-	;Rmin
-	oRmin['AXIS_RANGE']   = [1, 1.5e3]
-	oRmin['LOG']          = 1B
-	oRmin['SYMBOL']       = oRmag['SYMBOL']
-	oRmin['TICKINTERVAL'] = 500
-	oRmin['TITLE']        = 'Rmin!C(km)'
-	
-	;Ramg
-	oRmag['AXIS_RANGE'] = [1e0, 5e3]
-	oRmag['LABEL']      = ['mms1', 'mms2', 'mms3', 'mms4']
-	oRmag['LOG']        = 1B
-	oRmag -> RemoveAttr, 'SYMBOL'
 	
 	;RX
 	rx_range = [oR_minus[*,0].min, oR_plus[*,0].max]
@@ -282,10 +349,16 @@ TRANGE=trange
 ; Plot Data ////////////////////////////////
 ;-------------------------------------------
 	;Plot data
-	win = MrVar_PlotTS( [ rmag_null_vname, rx_null_vname, ry_null_vname, rz_null_vname, rmin_null_vname, err_vname ], $
+	win = MrVar_PlotTS( [ rmag_null_vname, rx_null_vname, ry_null_vname, rz_null_vname, $
+	                      rx_null_bary_vname, ry_null_bary_vname, rz_null_bary_vname, $
+	                      rmin_null_vname, err_vname ], $
 	                    /NO_REFRESH, $
 	                    XSIZE = 600, $
 	                    YSIZE = 700 )
+	
+	win = MrVar_OPlotTS(rx_null_bary_vname, rx_bary_vnames)
+	win = MrVar_OPlotTS(ry_null_bary_vname, ry_bary_vnames)
+	win = MrVar_OPlotTS(rz_null_bary_vname, rz_bary_vnames)
 	
 ;	op = MrVar_OPlotTS( rx_null_vname, [oR_minus[*,0], oR_plus[*,0]] )
 ;	op = MrVar_OPlotTS( ry_null_vname, [oR_minus[*,1], oR_plus[*,1]] )

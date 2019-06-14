@@ -172,8 +172,9 @@ VARNAMES=varnames
 	endif
 	
 	;Defaults
-	if n_elements(instr) eq 0 then instr = 'fgm'
-	if n_elements(level) eq 0 then begin
+	if n_elements(suffix) eq 0 then suffix = ''
+	if n_elements(instr)  eq 0 then instr  = 'fgm'
+	if n_elements(level)  eq 0 then begin
 		case instr of
 			'afg': level = 'l2pre'
 			'dfg': level = 'l2pre'
@@ -207,7 +208,7 @@ VARNAMES=varnames
 	                 TRANGE    = trange, $
 	                 VARFORMAT = varformat, $
 	                 VARNAMES  = varnames
-
+	
 ;-----------------------------------------------------
 ; Prettify Things \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
@@ -219,8 +220,8 @@ VARNAMES=varnames
 		;   - L2:   mms#_afg_b_gse_srvy_l2
 		;   - QL:   mms#_afg_srvy_dmpa has different names from L1A, L1B, L2Pre
 		;   - ELSE: mms#_afg_srvy_l1a_dmpa
-		if stregex(varnames[i], '(afg|dfg|fgm)_b_(gse|gsm|dmpa|bcs)', /BOOLEAN) || $
-		   stregex(varnames[i], '(afg|dfg|fgm)_(slow|fast|srvy|brst)_(l1a|l1b|l2pre_)?(dmpa|gse|gsm|gsm|gse).*' + suffix + '$', /BOOLEAN) $
+		if stregex(varnames[i], '(afg|dfg|fgm)_b_(gse|gsm|dmpa|bcs)_', /BOOLEAN) || $
+		   stregex(varnames[i], '(afg|dfg|fgm)_(slow|fast|srvy|brst)_(l1a|l1b|l2pre_)?(dmpa|gse|gsm|gsm|gse)_.*' + suffix + '$', /BOOLEAN) $
 		then begin
 			MrMMS_FGM_Load_Data_SplitB, varnames[i], bvec_name, bmag_name
 			varnames = [varnames, bvec_name, bmag_name]

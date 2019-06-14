@@ -48,6 +48,13 @@
 ;       SC:                 in, required, type=string/strarr
 ;                           The MMS spacecraft identifier. Options are:
 ;                               {'mms1' | 'mms2' | 'mms3' | 'mms4'}
+;       OUTPUT_DIR:         in, optional, type=string, default=pwd
+;                           A directory in which to save the figure. If neither `OUTPUT_DIR`
+;                               nor `OUTPUT_EXT` are defined, no file is generated.
+;       OUTPUT_EXT:         in, optional, type=string, default=pwd
+;                           File extensions for the output figure. Options include: 'eps', 'gif',
+;                               'jpg', 'ps', 'pdf', 'png', 'tiff'. If neither `OUTPUT_DIR` nor
+;                               `OUTPUT_EXT` are defined, no file is generated.
 ;       OPTDESC:            in, optional, type=string, default=''
 ;                           Optional descriptor of the data. Options are:
 ;                               {'amb' | 'amb-pm2' | 'amb-alt-oom' | 'amb-alt-oob'}
@@ -73,6 +80,8 @@
 ;-
 function MrMMS_EDI_Plot_AMB_BrstCts, sc, $
 NO_LOAD=no_load, $
+OUTPUT_DIR=output_dir, $
+OUTPUT_EXT=output_ext, $
 TRANGE=trange
 	compile_opt idl2
 
@@ -106,6 +115,11 @@ TRANGE=trange
 		MrMMS_Load_Data, sc, 'edi', 'srvy', level, $
 		                 OPTDESC   = ['amb', 'amb-pm2'], $
 		                 VARFORMAT = '*' + type + '*'
+		
+		;Load FPI data
+		MrMMS_FPI_Load_Data, sc, 'brst', $
+		                     OPTDESC   = 'des-moms', $
+		                     VARFORMAT = '*energyspectr_' + ['par', 'perp', 'anti'] + '*'
 	endif
 	
 ;-------------------------------------------
@@ -116,6 +130,14 @@ TRANGE=trange
 	suffix_srvy = '_srvy_' + level
 	suffix_brst = '_brst_' + level
 	ch          = ['1', '2', '3', '4']
+	
+	des_par_vname  = StrJoin( [sc, 'des', 'energyspectr', 'par',  'brst'], '_' )
+	des_perp_vname = StrJoin( [sc, 'des', 'energyspectr', 'perp', 'brst'], '_' )
+	des_anti_vname = StrJoin( [sc, 'des', 'energyspectr', 'anti', 'brst'], '_' )
+	
+	des_par_500eV_vname  = StrJoin( [sc, 'des', 'flux', 'par',  '500eV', 'brst'], '_' )
+	des_perp_500eV_vname = StrJoin( [sc, 'des', 'flux', 'perp', '500eV', 'brst'], '_' )
+	des_anti_500eV_vname = StrJoin( [sc, 'des', 'flux', 'anti', '500eV', 'brst'], '_' )
 	
 	;Names
 	cts_srvy_vname = [ prefix   + type + ch[0] + '_0'   + suffix_srvy, $
@@ -128,42 +150,153 @@ TRANGE=trange
 ; Set Properties ///////////////////////////
 ;-------------------------------------------
 	;BRST
+	yrange = [!values.f_infinity, -!values.f_infinity]
 	for i = 0, n_elements(cts_brst_vname) - 2 do begin
 		oVar = MrVar_Get( cts_brst_vname[i] )
-		oVar['AXIS_RANGE'] = [1, max(oVar['DATA'])]
+		iCts = oVar -> Where(0, /GREATER)
+		cmin = Min(oVar['DATA',iCts], MAX=cmax)
+		yrange[0] <= cmin
+		yrange[1] >= cmax
+		if i eq 0 then oVar['LABEL'] = 'brst'
 	endfor
 
 	;SRVY
 	for i = 0, n_elements(cts_srvy_vname) - 1 do begin
 		oVar = MrVar_Get( cts_srvy_vname[i] )
+		iCts = oVar -> Where(0, /GREATER)
+		cmin = Min(oVar['DATA',iCts], MAX=cmax)
+		yrange[0] <= cmin
+		yrange[1] >= cmax
 		oVar['COLOR'] = 'Red'
+		oVar['SYMBOL'] = 1
+		if i eq 0 then oVar['LABEL'] = 'srvy'
 	endfor
+	
+	yrange[0] = 10.0^Floor(ALog10(yrange[0]))
+	yrange[1] = 10.0^Ceil(ALog10(yrange[1]))
+
+;-------------------------------------------
+; Extract 500 eV Channel from FPI //////////
+;-------------------------------------------
+	oPar  = MrVar_Get(des_par_vname)
+	oPerp = MrVar_Get(des_perp_vname)
+	oAnti = MrVar_Get(des_anti_vname)
+	
+	;Indices of closest bin
+	oE   = oPar['DEPEND_1']
+	iE0  = MrNearestNeighbor(oE['DATA', 0, *], 500.0)
+	iE1  = MrNearestNeighbor(oE['DATA', 1, *], 500.0)
+	nPts = oE -> GetNPts()
+	iE   = LonArr(nPts)
+	iE[0:*:2] = iE0
+	iE[1:*:2] = iE1
+	
+	;Energy scale factor
+	oPar      = oPar[LIndGen(nPts), iE]
+	odE_plus  = (oPar['DEPEND_1'])['DELTA_MINUS_VAR']
+	odE_minus = (oPar['DEPEND_1'])['DELTA_MINUS_VAR']
+	odE       = odE_plus + odE_minus
+	e_scale   = 50.0 / odE['DATA']
+
+	;Select the energy bin
+	oPar  = e_scale * oPar
+	oPar -> SetName, des_par_500eV_vname
+	oPar -> Cache
+	oPar['COLOR']     = 'Blue'
+	oPar['LABEL']     = 'DES'
+	oPar['SYMBOL']    = 9
+	oPar['SYMTHICK']  = 2
+	oPar -> RemoveAttr, 'DEPEND_1'
+	
+	oPerp  = e_scale * oPerp[LIndGen(nPts), iE]
+	oPerp -> SetName, des_perp_500eV_vname
+	oPerp -> Cache
+	oPerp['COLOR']     = 'Blue'
+	oPerp['LABEL']     = 'DES'
+	oPerp['SYMBOL']    = 9
+	oPerp['SYMTHICK']  = 2
+	oPerp -> RemoveAttr, 'DEPEND_1'
+	
+	
+	oAnti  = e_scale * oAnti[LIndGen(nPts), iE]
+	oAnti -> SetName, des_anti_500eV_vname
+	oAnti -> Cache
+	oAnti['COLOR']     = 'Blue'
+;	oAnti['LABEL']     = 'DES'
+	oAnti['SYMCOLOR']  = 'Blue'
+	oAnti['SYMBOL']    = 9
+	oAnti['SYMTHICK']  = 2
+	oAnti -> RemoveAttr, 'DEPEND_1'
 
 ;-------------------------------------------
 ; First Row ////////////////////////////////
 ;-------------------------------------------
 	;Plot burst data
-	win = MrVar_PlotTS( cts_brst_vname, LAYOUT=[2,4], XSIZE=1000, YSIZE=600 )
-	win -> Refresh, /DISABLE
+	win = MrVar_PlotTS( cts_brst_vname, $
+	                    LAYOUT = [2,4], $
+	                    /NO_REFRESH, $
+	                    XSIZE  = 1000, $
+;	                    /YERR, $
+	                    YSIZE  = 600 )
+	
+	;YLOG -> Do not let error be negative
+;	oPoly = win -> Get(ISA='MrPolygon', /ALL, COUNT=nPoly)
+;	FOR i = 0, nPoly - 1 DO BEGIN
+;		oPoly[i] -> GetData, x, y
+;		oPoly[i] -> SetData, x, y>1
+;		oPoly[i].noclip = 0
+;	ENDFOR
 	
 	;Overplot survey data
-	cts_brst_vname = reform( cts_brst_vname, 2, 4 )
+	cts_brst_vname = Reform( cts_brst_vname, 2, 4 )
 	win = MrVar_OPlotTS( cts_brst_vname[*,0], cts_srvy_vname )
 	win = MrVar_OPlotTS( cts_brst_vname[*,1], cts_srvy_vname )
 	win = MrVar_OPlotTS( cts_brst_vname[*,2], cts_srvy_vname )
 	win = MrVar_OPlotTS( cts_brst_vname[*,3], cts_srvy_vname )
+	win = MrVar_OPlotTS( cts_brst_vname[*,0], [des_par_500eV_vname, des_anti_500eV_vname] )
+	win = MrVar_OPlotTS( cts_brst_vname[*,1], [des_par_500eV_vname, des_anti_500eV_vname] )
+	win = MrVar_OPlotTS( cts_brst_vname[*,2], [des_par_500eV_vname, des_anti_500eV_vname] )
+	win = MrVar_OPlotTS( cts_brst_vname[*,3], [des_par_500eV_vname, des_anti_500eV_vname] )
 	
 	;Create a legend
-	lgd = MrLegend( ALIGNMENT    = 'NW', $
-	                LABEL        = ['Brst', 'Srvy'], $
-	                LINESTYLE    = 6, $
-	                POSITION     = [1.0, 1.0], $
-	                /RELATIVE, $
-	                SAMPLE_WIDTH = 0.0, $
-	                TARGET       = win[cts_brst_vname[0,3]], $
-	                TEXT_COLOR   = ['Black', 'Red'] )
+;	lgd = MrLegend( ALIGNMENT    = 'NW', $
+;	                FILL_COLOR   = '', $
+;	                LABEL        = ['Brst', 'Srvy'], $
+;	                LINESTYLE    = 6, $
+;	                POSITION     = [1.0, 1.0], $
+;	                /RELATIVE, $
+;	                SAMPLE_WIDTH = 0.0, $
+;	                TARGET       = win[cts_brst_vname[0,3]], $
+;	                TEXT_COLOR   = ['Black', 'Red'] )
 	
-;	win -> SetGlobal, YRANGE=[1,2000]
+	win -> SetGlobal, YRANGE=yrange
+	win[cts_brst_vname[0]] -> SetLayout, [1,1]
+	win -> TrimLayout
 	win -> Refresh
+	win -> Refresh
+
+;-------------------------------------------
+; Save Figure //////////////////////////////
+;-------------------------------------------
+	IF N_Elements(output_dir) GT 0 || N_Elements(output_ext) GT 0 THEN BEGIN
+		;Defaults
+		IF N_Elements(output_dir) EQ 0 THEN BEGIN
+			CD, CURRENT=output_dir
+		ENDIF ELSE IF ~File_Test(output_dir, /DIRECTORY) THEN BEGIN
+			MrPrintF, 'LogText', 'Creating directory: "' + output_dir + '".'
+			File_MKDir, output_dir
+		ENDIF
+		
+		;File name
+		fname   = StrJoin( [sc, 'edi', 'brst', level, 'amb-srvy-brst-des-compare'], '_' )
+		fname   = FilePath( fname, ROOT_DIR=output_dir )
+		
+		;Save the figure
+		fout = MrVar_PlotTS_Save( win, fname, output_ext )
+	ENDIF
+
+;-------------------------------------------
+; Done /////////////////////////////////////
+;-------------------------------------------
 	return, win
 end

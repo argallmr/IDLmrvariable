@@ -79,6 +79,7 @@
 ;-
 FUNCTION MrMMS_Plot_FPI_GPD, sc, mode, species, $
 COORDS=coords, $
+ENERGIES=energies, $
 FGM_INSTR=fgm_instr, $
 LEVEL=level, $
 NO_LOAD=no_load, $
@@ -102,19 +103,23 @@ TAIL=tail
 	IF N_Elements(species)   EQ 0 THEN species   = 'e'
 	instr   = 'd' + species + 's'
 	
-	IF tf_tail THEN BEGIN
-		energies = [ [ 0, 10], $     ;< 100eV
-		             [11, 14], $     ;250 eV
-		             [15, 18], $     ;500 eV
-		             [19, 25], $     ;2.5 keV
-		             [26, 31] ]      ;> 7 keV
-	ENDIF ELSE BEGIN
-		energies = [ [ 0,  4], $    ;20 eV
-		             [ 5,  9], $    ;60 eV
-		             [10, 13], $    ;250 eV
-		             [14, 17], $    ;500 eV
-		             [18, 31] ]     ;> 1 keV
-	ENDELSE
+	IF N_Elements(energies) EQ 0 THEN BEGIN
+		IF tf_tail THEN BEGIN
+			energies = [ [ 0, 10], $     ;< 100eV
+			             [11, 14], $     ;250 eV
+			             [15, 18], $     ;500 eV
+			             [19, 25], $     ;2.5 keV
+			             [26, 31] ]      ;> 7 keV
+		ENDIF ELSE BEGIN
+			energies = [ [ 0,  4], $    ;20 eV
+			             [ 5,  9], $    ;60 eV
+			             [10, 13], $    ;250 eV
+			             [14, 17], $    ;500 eV
+			             [18, 31] ]     ;> 1 keV
+		ENDELSE
+	ENDIF
+	nEnergies = N_Elements(energies[0,*])
+	
 
 ;-------------------------------------------
 ; Variable Names ///////////////////////////
@@ -134,18 +139,8 @@ TAIL=tail
 	;Derived Moments
 	pscl_vname    = StrJoin( [sc, fpi_instr, 'p', coords, fpi_mode], '_')
 	pscl_calc_vname = StrJoin( [sc, fpi_instr, 'p',    'calc', coords, fpi_mode], '_')
-	gpd_20_vname  = StrJoin( [sc, fpi_instr, 'gpd',     '20eV',  fpi_mode], '_')
-	gpd_60_vname  = StrJoin( [sc, fpi_instr, 'gpd',     '60eV',  fpi_mode], '_')
-	gpd_250_vname = StrJoin( [sc, fpi_instr, 'gpd',     '250eV', fpi_mode], '_')
-	gpd_500_vname = StrJoin( [sc, fpi_instr, 'gpd',     '500eV', fpi_mode], '_')
-	gpd_1k_vname  = StrJoin( [sc, fpi_instr, 'gpd',     '1keV',  fpi_mode], '_')
-	q_20_vname    = StrJoin( [sc, fpi_instr, 'qfactor', '20eV',  fpi_mode], '_')
-	q_60_vname    = StrJoin( [sc, fpi_instr, 'qfactor', '60eV',  fpi_mode], '_')
-	q_250_vname   = StrJoin( [sc, fpi_instr, 'qfactor', '250eV', fpi_mode], '_')
-	q_500_vname   = StrJoin( [sc, fpi_instr, 'qfactor', '500eV', fpi_mode], '_')
-	q_1k_vname    = StrJoin( [sc, fpi_instr, 'qfactor', '1keV',  fpi_mode], '_')
-	q_all_vname   = StrJoin( [sc, fpi_instr, 'qfactor', 'all',   fpi_mode], '_')
-	q_moms_vname  = StrJoin( [sc, fpi_instr, 'qfactor', 'moms',  fpi_mode], '_')
+	gpd_vnames    = StrJoin( [sc, fpi_instr, 'gpd',     fpi_mode], '_') + '_' + StrTrim(IndGen(nEnergies+1), 2)
+	q_vnames      = StrJoin( [sc, fpi_instr, 'qfactor', fpi_mode], '_') + '_' + StrTrim(IndGen(nEnergies+2), 2)
 
 ;-------------------------------------------
 ; Load Data ////////////////////////////////
@@ -179,7 +174,25 @@ TAIL=tail
 	ENDIF
 	
 ;-------------------------------------------
-; GPD(E) ///////////////////////////////////
+; Energy Bin Labels ////////////////////////
+;-------------------------------------------
+	
+	;Determine axis labels
+	oDist = MrVar_Get(f_vname)
+	oE    = oDist['DEPEND_3']
+	E_labels = StrArr(5)
+	E_titles = StrArr(5)
+	FOR i = 0, nEnergies-1 DO BEGIN
+		E0 = oE['DATA',0,energies[0,i]]
+		E1 = oE['DATA',0,energies[1,i]]
+		E0 = E0 LT 1000 ? String(E0, FORMAT='(i0)')+'eV' : String(E0/1000.0, FORMAT='(i0)')+'keV'
+		E1 = E1 LT 1000 ? String(E1, FORMAT='(i0)')+'eV' : String(E1/1000.0, FORMAT='(i0)')+'keV'
+		E_labels[i] = E0 + '-' + E1
+		E_titles[i] = E0 + '!C' + E1
+	ENDFOR
+	
+;-------------------------------------------
+; GPD & Q //////////////////////////////////
 ;-------------------------------------------
 
 	;Size of each velocity-space volume element
@@ -194,43 +207,44 @@ TAIL=tail
 	
 	;Distribution function
 	theSpecies  = species EQ 'i' ? 'H' : species
-	oDist4D_FAC = MrDist4D(oDist_FAC, VSC=scpot_vname, SPECIES=theSpecies)
+	oDist4D_FAC = MrDist4D_v1(oDist_FAC, VSC=scpot_vname, SPECIES=theSpecies)
 	
 	;Gyrophase distribution
 	;   - Weight each bin by its original size.
 	;   - This compensates for the non-uniform spacing in FAC coordinates
 	;   - Do not have to re-bin data into FAC coordinate grid
-	oGPD_20eV  = oDist4D_FAC -> PhiSpec( E_RANGE=energies[*,0], /CACHE, NAME=gpd_20_vname,  THETA_RANGE=[0.0, 180.0], UNITS='EFLUX', WEIGHT=odV )
-	oGPD_60eV  = oDist4D_FAC -> PhiSpec( E_RANGE=energies[*,1], /CACHE, NAME=gpd_60_vname,  THETA_RANGE=[0.0, 180.0], UNITS='EFLUX', WEIGHT=odV )
-	oGPD_250eV = oDist4D_FAC -> PhiSpec( E_RANGE=energies[*,2], /CACHE, NAME=gpd_250_vname, THETA_RANGE=[0.0, 180.0], UNITS='EFLUX', WEIGHT=odV )
-	oGPD_500eV = oDist4D_FAC -> PhiSpec( E_RANGE=energies[*,3], /CACHE, NAME=gpd_500_vname, THETA_RANGE=[0.0, 180.0], UNITS='EFLUX', WEIGHT=odV )
-	oGPD_1keV  = oDist4D_FAC -> PhiSpec( E_RANGE=energies[*,4], /CACHE, NAME=gpd_1k_vname,  THETA_RANGE=[0.0, 180.0], UNITS='EFLUX', WEIGHT=odV )
+	oGPD      = ObjArr(nEnergies)
+	oPres     = ObjArr(nEnergies+1)
+	oQ        = ObjArr(nEnergies+2)
+	oDist4D   = MrDist4D(f_vname, VSC=scpot_vname, SPECIES=theSpecies)
+	qrange    = [0, -!Values.f_infinity]
+	colors = MrDefaultColor(NCOLORS=7)
 	
-	Obj_Destroy, [odV, oDist_FAC, oDist4D_FAC]
-
-;-------------------------------------------
-; Compute Moments //////////////////////////
-;-------------------------------------------
-	;Distribution function
-	;   - Calculate moments in original coordinate system
-	oDist4D  = MrDist4D(f_vname, VSC=scpot_vname, SPECIES=theSpecies)
-	oDist4D -> Moments, PRESSURE = oPres_20eV,  ENERGY_RANGE = energies[*,0]
-	oDist4D -> Moments, PRESSURE = oPres_60eV,  ENERGY_RANGE = energies[*,1]
-	oDist4D -> Moments, PRESSURE = oPres_250eV, ENERGY_RANGE = energies[*,2]
-	oDist4D -> Moments, PRESSURE = oPres_500eV, ENERGY_RANGE = energies[*,3]
-	oDist4D -> Moments, PRESSURE = oPres_1keV,  ENERGY_RANGE = energies[*,4]
-	oDist4D -> Moments, PRESSURE = oPres_All,   ENERGY_RANGE = [0, 31]
-
-	;Calculate agyrotropy Q-value
-	oQ_20eV  = MrVar_Pres_QFactor( bvec_vname, oPres_20eV,  /CACHE, NAME=q_20_vname  )
-	oQ_60eV  = MrVar_Pres_QFactor( bvec_vname, oPres_60eV,  /CACHE, NAME=q_60_vname  )
-	oQ_250eV = MrVar_Pres_QFactor( bvec_vname, oPres_250eV, /CACHE, NAME=q_250_vname )
-	oQ_500eV = MrVar_Pres_QFactor( bvec_vname, oPres_500eV, /CACHE, NAME=q_500_vname )
-	oQ_1keV  = MrVar_Pres_QFactor( bvec_vname, oPres_1keV,  /CACHE, NAME=q_1k_vname  )
-	oQ_all   = MrVar_Pres_QFactor( bvec_vname, oPres_All,   /CACHE, NAME=q_all_vname )
-	oQ_moms  = MrVar_Pres_QFactor( bvec_vname, p_vname,     /CACHE, NAME=q_moms_vname )
+	FOR i = 0, nEnergies - 1 DO BEGIN
+		;Gyrophase distributions at each energy
+		oGPD[i]  = oDist4D_FAC -> PhiSpec( E_RANGE=energies[*,i], /CACHE, NAME=gpd_vnames[i],  THETA_RANGE=[0.0, 180.0], UNITS='EFLUX', WEIGHT=odV )
+		oPhi     = (oGPD[i])['DEPEND_1']
+		oPhi['AXIS_RANGE']   = [-180.0, 180.0]
+		oPhi['TICKINTERVAL'] = 90.0
+		oPhi['TITLE']        = 'Gyrophase!C' + E_titles[0] + '!C(deg)'
+		
+		;Q-Factor at each energy
+		oDist4D -> Moments, PRESSURE = oP, ENERGY_RANGE = energies[*,i]
+		oPres[i] = oP
+		oQ[i]    = MrVar_Pres_QFactor( bvec_vname, oP, /CACHE, NAME=q_vnames[i] )
+		qrange[1]        >= oQ[i].max
+		(oQ[i])['COLOR'] = colors[i]
+		(oQ[i])['LABEL'] = E_labels[i]
+	ENDFOR
 	
-	Obj_Destroy, oDist4D
+	;Q-Factor for all energies: DES & Derived
+	oDist4D -> Moments, PRESSURE = oP, ENERGY_RANGE = [0, 31]
+	oPres[-1] = oP
+	
+	oQ[-2] = MrVar_Pres_QFactor( bvec_vname, oP, /CACHE, NAME=q_vnames[-2] )
+	oQ[-1] = MrVar_Pres_QFactor( bvec_vname, p_vname, /CACHE, NAME=q_vnames[-1] )
+	
+	Obj_Destroy, [odV, oDist_FAC, oDist4D_FAC, oDist4D]
 
 ;-------------------------------------------
 ; Split Moments ////////////////////////////
@@ -240,7 +254,7 @@ TAIL=tail
 	                    /CACHE, $
 	                    NAME = pscl_vname )
 	
-	oP    = oPres_All
+	oP    = oPres[-1]
 	oPscl = MrScalarTS( oP['TIMEVAR'], (oP[*,0,0] + oP[*,1,1] + oP[*,2,2]) / 3.0, $
 	                    /CACHE, $
 	                    NAME = pscl_calc_vname )
@@ -252,87 +266,17 @@ TAIL=tail
 	oB = MrVar_Get(b_vname)
 	oB['PLOT_TITLE'] = StrUpCase( StrJoin( [sc, fpi_instr, fpi_mode, level], ' ' ) )
 	
-	;Determine axis labels
-	oDist = MrVar_Get(f_vname)
-	oE    = oDist['DEPEND_3']
-	E_labels = StrArr(5)
-	E_titles = StrArr(5)
-	FOR i = 0, 4 DO BEGIN
-		E0 = oE['DATA',0,energies[0,i]]
-		E1 = oE['DATA',0,energies[1,i]]
-		E0 = E0 LT 1000 ? String(E0, FORMAT='(i0)')+'eV' : String(E0/1000.0, FORMAT='(i0)')+'keV'
-		E1 = E1 LT 1000 ? String(E1, FORMAT='(i0)')+'eV' : String(E1/1000.0, FORMAT='(i0)')+'keV'
-		E_labels[i] = E0 + '-' + E1
-		E_titles[i] = E0 + '!C' + E1
-	ENDFOR
-	
 	;
 	; GPD
 	;
 	
-	;20eV
-	oPhi = oGPD_20eV['DEPEND_1']
-	oPhi['AXIS_RANGE']   = [-180.0, 180.0]
-	oPhi['TICKINTERVAL'] = 90.0
-	oPhi['TITLE']        = 'Gyrophase!C' + E_titles[0] + '!C(deg)'
-	
-	;60eV
-	oPhi = oGPD_60eV['DEPEND_1']
-	oPhi['AXIS_RANGE']   = [-180.0, 180.0]
-	oPhi['TICKINTERVAL'] = 90.0
-	oPhi['TITLE']        = 'Gyrophase!C' + E_titles[1] + '!C(deg)'
-	
-	;250eV
-	oPhi = oGPD_250eV['DEPEND_1']
-	oPhi['AXIS_RANGE']   = [-180.0, 180.0]
-	oPhi['TICKINTERVAL'] = 90.0
-	oPhi['TITLE']        = 'Gyrophase!C' + E_titles[2] + '!C(deg)'
-	
-	;500eV
-	oPhi = oGPD_500eV['DEPEND_1']
-	oPhi['AXIS_RANGE']   = [-180.0, 180.0]
-	oPhi['TICKINTERVAL'] = 90.0
-	oPhi['TITLE']        = 'Gyrophase!C' + E_titles[3] + '!C(deg)'
-	
-	;1keV
-	oPhi = oGPD_1keV['DEPEND_1']
-	oPhi['AXIS_RANGE']   = [-180.0, 180.0]
-	oPhi['TICKINTERVAL'] = 90.0
-	oPhi['TITLE']        = 'Gyrophase!C' + E_titles[4] + '!C(deg)'
 	
 	;
 	; Q
 	;
-	colors = MrDefaultColor(NCOLORS=7)
-	
-	;20eV
-	oQ_20eV['AXIS_RANGE'] = [0, Max( [oQ_20eV.max, oQ_60eV.max, oQ_250eV.max, oQ_500eV.max, oQ_1keV.max, oQ_all.max] )]
-	oQ_20eV['COLOR']      = colors[0]
-	oQ_20eV['LABEL']      = E_labels[0]
-	
-	;60eV
-	oQ_60eV['COLOR'] = colors[1]
-	oQ_60eV['LABEL'] = E_labels[1]
-	
-	;250eV
-	oQ_250eV['COLOR'] = colors[2]
-	oQ_250eV['LABEL'] = E_labels[2]
-	
-	;20eV
-	oQ_500eV['COLOR'] = colors[3]
-	oQ_500eV['LABEL'] = E_labels[3]
-	
-	;1keV
-	oQ_1keV['COLOR'] = colors[4]
-	oQ_1keV['LABEL'] = E_labels[4]
-	
-	;All
-	oQ_all['COLOR'] = colors[5]
-	oQ_all['LABEL'] = 'UNH'
-	
-	;Moms
-	oQ_moms['COLOR'] = colors[6]
-	oQ_moms['LABEL'] = 'FPI'
+	(oQ[0])['AXIS_RANGE'] = qrange
+	(oQ[-2])['LABEL']     = 'UNH'
+	(oQ[-1])['LABEL']     = 'FPI'
 	
 	;
 	; P
@@ -350,13 +294,12 @@ TAIL=tail
 ;-------------------------------------------
 ; Plot /////////////////////////////////////
 ;-------------------------------------------
-	win = MrVar_PlotTS( [b_vname, gpd_20_vname, gpd_60_vname, gpd_250_vname, gpd_500_vname, gpd_1k_vname, $
-	                     q_20_vname, pscl_vname], $
+	win = MrVar_PlotTS( [b_vname, gpd_vnames, q_vnames[0], pscl_vname], $
 	                    /NO_REFRESH, $
 	                    YSIZE = 750 )
 	
 	;Overplot Q-factors
-	win = MrVar_OPlotTS( q_20_vname, [q_60_vname, q_250_vname, q_500_vname, q_1k_vname, q_all_vname, q_moms_vname] )
+	win = MrVar_OPlotTS( q_vnames[0], q_vnames[1:*] )
 	win = MrVar_OPlotTS( pscl_vname, pscl_calc_vname )
 
 	win[0] -> SetLayout, [1,1]

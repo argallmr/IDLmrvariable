@@ -511,6 +511,10 @@ VARNAMES=varnames
 	                 VARFORMAT = varformat
 	
 	IF tf_rager THEN !MrMMS -> SetProperty, OFFLINE=offline, DROPBOX_ROOT=dropbox_root
+
+;-----------------------------------------------------
+; Add Metadata \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
 	
 	;Associate variable attributes with DEPEND_[0-3]
 	dist_vname = sc + '_d' + species + 's_dist_' + mode

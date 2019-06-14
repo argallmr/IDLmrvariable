@@ -81,6 +81,7 @@
 ;       2017/01/05  -   Written by Matthew Argall
 ;-
 FUNCTION MrMMS_Plot_EDP_Hall, sc, mode, $
+COORDS=coords, $
 FGM_INSTR=fgm_instr, $
 EPHDESC=ephdesc, $
 LEVEL=level, $
@@ -117,8 +118,11 @@ TRANGE=trange
 	ENDIF
 	
 	;Constants
-	q  = MrConstants('q')
-	e0 = MrConstants('epsilon_0')
+	q     = MrConstants('q')
+	e0    = MrConstants('epsilon_0')
+	perp  = '!9' + String(120B) + '!X'
+	nabla = '!9' + String(71B) + '!X'
+	cdot  = '!9' + String(46B) + '!X'
 	
 ;-------------------------------------------
 ; Instrument Parameters ////////////////////
@@ -131,43 +135,72 @@ TRANGE=trange
 		'fsm': fgm_level = 'l3'
 		ELSE: Message, 'Invalid FGM instrument: "' + fgm_instr + '".'
 	ENDCASE
-	fgm_coords  = MrIsMember(['dsl', 'dbcs'], coords) ? 'dmpa' : coords
+	CASE coords OF
+		'dsl':  fgm_coords = 'dmpa'
+		'dbcs': fgm_coords = 'dmpa'
+		'gse':  fgm_coords = coords
+		'gsm':  fgm_coords = coords
+		ELSE:   fgm_coords = 'gse'
+	ENDCASE
 	fgm_optdesc = fgm_instr EQ 'fsm' ? '8khz' : ''
 	
 	;EDP
 	edp_mode    = mode EQ 'brst' ? mode : 'fast'
-	edp_coords  = MrIsMember(['dmpa', 'dbcs'], coords) ? 'dsl' : coords
 	edp_optdesc = 'dce'
+	CASE coords OF
+		'dmpa': edp_coords = 'dsl'
+		'dbcs': edp_coords = 'dsl'
+		'gse':  edp_coords = coords
+		'gsm':  edp_coords = coords
+		ELSE:   edp_coords = 'gse'
+	ENDCASE
 	
 	;FPI
 	fpi_mode    = mode EQ 'brst' ? mode : 'fast'
-	fpi_coords  = MrIsMember(['dmpa', 'dsl'], coords) ? 'dbcs' : coords
 	des_optdesc = 'des-moms'
 	dis_optdesc = 'dis-moms'
+	CASE coords OF
+		'dmpa': fpi_coords = 'dsl'
+		'dsl':  fpi_coords = 'dbcs'
+		'gse':  fpi_coords = coords
+		'gsm':  fpi_coords = coords
+		ELSE:   fpi_coords = 'gse'
+	ENDCASE
+	
+	;EPH
+	CASE coords OF
+		'dmpa': Message, 'EPHEMERIS products do not have coordinate system "' + coords + '".'
+		'dsl':  Message, 'EPHEMERIS products do not have coordinate system "' + coords + '".'
+		'dmpa': Message, 'EPHEMERIS products do not have coordinate system "' + coords + '".'
+		'gse':  eph_coords = coords
+		'gsm':  eph_coords = coords
+		ELSE:   eph_coords = 'gse'
+	ENDCASE
 	
 ;-------------------------------------------
 ; Variable Names ///////////////////////////
 ;-------------------------------------------
+	all_sc = 'mms' + ['1', '2', '3', '4']
+	nSC    = N_Elements(all_sc)
 	
 	;FGM
-	b_vname    = StrJoin([sc, fgm_instr, 'b',    fgm_coords, mode, fgm_level], '_')
-	bmag_vname = StrJoin([sc, fgm_instr, 'bmag', fgm_coords, mode, fgm_level], '_')
-	bvec_vname = StrJoin([sc, fgm_instr, 'bvec', fgm_coords, mode, fgm_level], '_')
+	b_vnames    = all_sc + '_' + StrJoin([fgm_instr, 'b',    fgm_coords, mode, fgm_level], '_')
+	bmag_vnames = all_sc + '_' + StrJoin([fgm_instr, 'bmag', fgm_coords, mode, fgm_level], '_')
+	bvec_vnames = all_sc + '_' + StrJoin([fgm_instr, 'bvec', fgm_coords, mode, fgm_level], '_')
 	
 	;EDP
-	all_sc   = 'mms' + ['1', '2', '3', '4']
 	e_vnames = all_sc + '_' + StrJoin( ['edp', 'dce', edp_coords, edp_mode, level], '_' )
 	
 	;MEC
 	IF Array_Equal(ephdesc EQ ['defeph', 'predeph'], 0) $
-		THEN r_vnames = all_sc + '_' + StrJoin( ['mec', 'r', coords], '_' ) $
+		THEN r_vnames = all_sc + '_' + StrJoin( ['mec', 'r', eph_coords], '_' ) $
 		ELSE r_vnames = StrUpCase(sc) + '_' + StrUpCase(ephdesc) + '_' + 'R'
 	
 	;FPI
-	ni_vname = StrJoin([sc, 'dis', 'numberdensity',             fpi_mode], '_')
-	vi_vname = StrJoin([sc, 'dis', 'bulkv',         fpi_coords, fpi_mode], '_')
-	ne_vname = StrJoin([sc, 'des', 'numberdensity',             fpi_mode], '_')
-	ve_vname = StrJoin([sc, 'des', 'bulkv',         fpi_coords, fpi_mode], '_')
+	ni_vnames = all_sc + '_' + StrJoin(['dis', 'numberdensity',             fpi_mode], '_')
+	vi_vnames = all_sc + '_' + StrJoin(['dis', 'bulkv',         fpi_coords, fpi_mode], '_')
+	ne_vnames = all_sc + '_' + StrJoin(['des', 'numberdensity',             fpi_mode], '_')
+	ve_vnames = all_sc + '_' + StrJoin(['des', 'bulkv',         fpi_coords, fpi_mode], '_')
 	
 	;Output names
 	CASE StrUpCase(sc) OF
@@ -180,10 +213,14 @@ TRANGE=trange
 	ex_vname    = e_vname + '_x'
 	ey_vname    = e_vname + '_y'
 	ez_vname    = e_vname + '_z'
-	jxb_vname   = StrJoin( [sc, 'fpi', 'jxb', edp_coords, fpi_mode, level], '_' )
-	jxbx_vname  = jxb_vname + '_x'
-	jxby_vname  = jxb_vname + '_y'
-	jxbz_vname  = jxb_vname + '_z'
+	eperp_vname = StrJoin( [sc, 'edp', 'dce', 'perp', edp_mode, level], '_' )
+	eperpx_vname = eperp_vname + '_x'
+	eperpy_vname = eperp_vname + '_y'
+	eperpz_vname = eperp_vname + '_z' 
+	jxb_vnames   = all_sc + '_' + StrJoin( ['fpi', 'jxb', edp_coords, fpi_mode, level], '_' )
+	jxbx_vnames  = jxb_vnames + '_x'
+	jxby_vnames  = jxb_vnames + '_y'
+	jxbz_vnames  = jxb_vnames + '_z'
 	vixb_vname  = StrJoin( [sc, 'dis', 'vxb', edp_coords, edp_mode, level], '_' )
 	vixbx_vname = vixb_vname + '_x'
 	vixby_vname = vixb_vname + '_y'
@@ -192,15 +229,20 @@ TRANGE=trange
 	vexbx_vname = vexb_vname + '_x'
 	vexby_vname = vexb_vname + '_y'
 	vexbz_vname = vexb_vname + '_z'
-	j_vname     = StrJoin([sc, 'fpi', 'j', fpi_coords, fpi_mode], '_')
+	j_vnames    = all_sc + '_' + StrJoin(['fpi', 'j', fpi_coords, fpi_mode], '_')
+	jxb_vnames  = all_sc + '_' + StrJoin(['fpi', 'jxb', fpi_coords, fpi_mode], '_')
+	jxbx_vnames = jxb_vnames + '_x'
+	jxby_vnames = jxb_vnames + '_y'
+	jxbz_vnames = jxb_vnames + '_z'
 	rho_vname   = StrJoin( ['mms', 'edp', 'rho', mode, level], '_' )
+	div_jxb_vname = StrJoin( ['mms', 'fpi', 'divjxb', mode, level], '_' )
 		
 ;-------------------------------------------
 ; Get Data /////////////////////////////////
 ;-------------------------------------------
 	IF tf_load THEN BEGIN
 		;FGM
-		MrMMS_FGM_Load_Data, sc, mode, $
+		MrMMS_FGM_Load_Data, '', mode, $
 		                     INSTR   = fgm_instr, $
 		                     LEVEL   = fgm_level, $
 		                     OPTDESC = fgm_optdesc, $
@@ -212,12 +254,12 @@ TRANGE=trange
 		                 VARFORMAT = ['*dce_'+edp_coords+'*', '*dce_par*']
 
 		;DES
-		MrMMS_FPI_Load_Data, sc, fpi_mode, $
+		MrMMS_FPI_Load_Data, '', fpi_mode, $
 		                     OPTDESC   = des_optdesc, $
 		                     VARFORMAT = ['*density_'+fpi_mode, '*bulkv_'+fpi_coords+'_'+fpi_mode]
 		                     
 		;DIS
-		MrMMS_FPI_Load_Data, sc, fpi_mode, $
+		MrMMS_FPI_Load_Data, '', fpi_mode, $
 		                     OPTDESC   = dis_optdesc, $
 		                     VARFORMAT = ['*density_'+fpi_mode, '*bulkv_'+fpi_coords+'_'+fpi_mode]
 		
@@ -227,169 +269,258 @@ TRANGE=trange
 		                 VARFORMAT = r_vnames
 	ENDIF
 	
+	idx = Fix(StrMid(sc, 3, 1)) - 1
+	
 ;-------------------------------------------
 ; Free Charge Density //////////////////////
 ;-------------------------------------------
 	;Grab E & R
-	oNe = MrVar_Get(ne_vname)
-	oE1 = MrVar_Get(e_vnames[0])
-	oE2 = MrVar_Get(e_vnames[1])
-	oE3 = MrVar_Get(e_vnames[2])
-	oE4 = MrVar_Get(e_vnames[3])
-	oR1 = MrVar_Get(r_vnames[0])
-	oR2 = MrVar_Get(r_vnames[1])
-	oR3 = MrVar_Get(r_vnames[2])
-	oR4 = MrVar_Get(r_vnames[3])
+	oNe = MrVar_Get(ne_vnames[idx])
+	oTref = oNe['DEPEND_0']
 	
-	;Interpolate to Ne on the selected spacecraft
-	oE1 = oE1 -> Interpol(oNe)
-	oE2 = oE2 -> Interpol(oNe)
-	oE3 = oE3 -> Interpol(oNe)
-	oE4 = oE4 -> Interpol(oNe)
-	oR1 = oR1 -> Interpol(oNe)
-	oR2 = oR2 -> Interpol(oNe)
-	oR3 = oR3 -> Interpol(oNe)
-	oR4 = oR4 -> Interpol(oNe)
+	oE = ObjArr(4)
+	oPos = ObjArr(4)
+	FOR i = 0, 3 DO BEGIN
+		oE[i]   = MrVar_Resample(e_vnames[i], oTref)
+		oPos[i] = MrVar_Resample(r_vnames[i], oTref)
+	ENDFOR
 	
 	;Create the reciprocal vectors
-	oRecipVec = MrVar_RecipVec(oR1, oR2, oR3, oR4)
+	oRecipVec = MrVar_RecipVec(oPos[0], oPos[1], oPos[2], oPos[3])
 	
 	;Charge Density
 	;   - 1e4 converts to C/cm^2
-	oRho = (e0 / q * 1e-12) * oRecipVec -> Divergence( oE1, oE2, oE3, oE4 )
+	oRho = (e0 / q * 1e-12) * oRecipVec -> Divergence( oE[0], oE[1], oE[2], oE[3] )
 	oRho -> SetName, rho_vname
 	oRho -> Cache
 	oRho['CATDESC'] = 'Free charge density, computed from the divergence of the electric field.'
-	oRho['TITLE']   = '$\Delta$#!C(#/cm^3)'
-	oRho['UNITS']   = '#/cm^3'
+	oRho['LABEL']   = '$\epsilon$$\down0$/e' + nabla + cdot + 'E'
+	oRho['TITLE']   = '$\rho$/e!C(cm$\up-3$)'
+	oRho['UNITS']   = 'cm^-3'
+	
+	Obj_Destroy, [oRecipVec, oE, oPos]
 	
 ;-------------------------------------------
-; Current Density //////////////////////////
+; J, JxB, Div(JxB) /////////////////////////
 ;-------------------------------------------
-	;Get N and V
-	oNe = MrVar_Get(ne_vname)
-	oNi = MrVar_Get(ni_vname)
-	oVi = MrVar_Get(vi_vname)
-	oVe = MrVar_Get(ve_vname)
+	oB   = ObjArr(nSC)
+	oE   = ObjArr(nSC)
+	oNe  = ObjArr(nSC)
+	oVe  = ObjArr(nSC)
+	oNi  = ObjArr(nSC)
+	oVi  = ObjArr(nSC)
+	oJ   = ObjArr(nSC)
+	oJxB = ObjArr(nSC)
+	oPos = ObjArr(nSC)
+	FOR i = 0, 3 DO BEGIN
+		;Interpolate to DES
+		oB[i]   = MrVar_Resample(bvec_vnames[i], oTref)
+		oE[i]   = MrVar_Resample(e_vnames[i],    oTref)
+		oNe[i]  = MrVar_Resample(ne_vnames[i],   oTref)
+		oVe[i]  = MrVar_Resample(ve_vnames[i],   oTref)
+		oNi[i]  = MrVar_Resample(ni_vnames[i],   oTref)
+		oVi[i]  = MrVar_Resample(vi_vnames[i],   oTref)
+		oPos[i] = MrVar_Resample(r_vnames[i],    oTref)
+	
+		;Compute current density
+		;   - 1e15 converts to uA/m^2
+		q  = MrConstants('q')
+		oJ[i] = q * 1e15 * oNe[i] * (oVi[i] - oVe[i])
+		oJ[i] -> SetName, j_vnames[i]
+		oJ[i] -> Cache
 		
-	;Interpolate DIS to DES
-	oVi_des = oVi -> Interpol(oVe)
-	oNi_des = oNi -> Interpol(oVe)
+		;Hall field
+		;   - 1e-18 converts to mV/m
+		oJxB[i] = 1.0/(1e18 * q * oNe[i]) * oJ[i] -> Cross(oB[i])
+		oJxB[i] -> SetName, jxb_vnames[i]
+		oJxB[i] -> Cache
+	ENDFOR
 	
-	;Compute current density
-	;   - 1e15 converts to uA/m^2
-	q  = MrConstants('q')
-	oJ = q * 1e15 * oNe * (oVi_des - oVe)
-	oJ -> SetName, j_vname
-	oJ -> Cache
-	oJ['CATDESC'] = 'Current density calculated from particle moments: J=q*ne*(Vi-Ve).'
-	oJ['COLOR']   = ['Blue', 'Forest Green', 'Red']
-	oJ['LABEL']   = ['X', 'Y', 'Z']
-	oJ['TITLE']   = 'J!C$\mu$A/m^2'
-	oJ['UNITS']   = 'uA/m^2'
+	;Create the reciprocal vectors
+	oRecipVec = MrVar_RecipVec(oPos[0], oPos[1], oPos[2], oPos[3])
+	
+	;Charge Density
+	;   - 1e4 converts to C/cm^2
+	oDivJxB = (e0 / q * 1e-12) * oRecipVec -> Divergence( oJxB[0], oJxB[1], oJxB[2], oJxB[3] )
+	oDivJxB -> SetName, div_jxb_vname
+	oDivJxB -> Cache
+	oDivJxB['CATDESC'] = 'Free charge density, computed from the divergence of JxB.'
+	oDivJxB['COLOR']   = 'Blue'
+	oDivJxB['LABEL']   = '$\epsilon$$\down0$/e' + nabla + cdot + '(JxB)'
+	oDivJxB['TITLE']   = '$\rho$/e!C(cm$\up-3$)'
+	oDivJxB['UNITS']   = 'cm^-3'
+	
+	Obj_Destroy, oRecipVec
 	
 ;-------------------------------------------
 ; Electric Fields //////////////////////////
 ;-------------------------------------------
-	oB = MrVar_Get(bvec_vname)
-	CASE StrUpCase(sc) OF
-		'MMS1': oE = MrVar_Get(e_vnames[0])
-		'MMS2': oE = MrVar_Get(e_vnames[1])
-		'MMS3': oE = MrVar_Get(e_vnames[2])
-		'MMS4': oE = MrVar_Get(e_vnames[3])
-		ELSE: Message, 'Invalid spacecraft: "' + sc + '".'
-	ENDCASE
-	
-	;Interpolate to DES
-	oB_des = oB -> Interpol(oVe)
-	oE_des = oE -> Interpol(oVe)
-	
-	;Hall field
-	;   - 1e-18 converts to mV/m
-	oJxB = 1.0/(1e18 * q * oNe) * oJ -> Cross(oB_des)
-	oJxB -> SetName, jxb_vname
-	oJxB -> Cache
-	oJxB['CATDESC'] = 'E = (JxB)/(ne)'
-	oJxB['COLOR']   = ['Blue', 'Forest Green', 'Red']
-	oJxB['LABEL']   = ['X', 'Y', 'Z']
-	oJxB['TITLE']   = ['JxB/ne!C(mV/m)']
-	oJxB['UNITS']   = ['mV/m']
+	;Perpendicular field
+	;  - Roy's method does not work...
+;	oB_hat  = oB[idx] -> Normalize()
+;	oE_perp = oE[idx] * (1.0 - oB_hat)
+	oTx = MrVar_FAC(oB[idx])
+	oE_perp      = oTx ## oE[idx]
+	oE_perp[*,2] = 0.0
+	oE_perp      = (oTx -> Transpose()) ## oE_perp
+	oE_perp -> SetName, eperp_vname
+	oE_perp -> Cache
 	
 	;Convective field
 	;   - 1e-3 converts to mV/m
-	oVexB = -1e-3 * oVe -> Cross(oB_des)
+	oVexB = -1e-3 * oVe[idx] -> Cross(oB[idx])
 	oVexB -> SetName, vexb_vname
 	oVexB -> Cache
-	oVexB['CATDESC'] = 'E = -VexB'
-	oVexB['COLOR']   = ['Blue', 'Forest Green', 'Red']
-	oVexB['LABEL']   = ['X', 'Y', 'Z']
-	oVexB['TITLE']   = ['-VexB!C(mV/m)']
-	oVexB['UNITS']   = ['mV/m']
 	
 	;Convective field
 	;   - 1e-3 converts to mV/m
-	oVixB = -1e-3 * oVi_des -> Cross(oB_des)
+	oVixB = -1e-3 * oVi[idx] -> Cross(oB[idx])
 	oVixB -> SetName, vixb_vname
 	oVixB -> Cache
+	
+;-------------------------------------------
+; Rotate ///////////////////////////////////
+;-------------------------------------------
+	IF coords EQ 'mva' THEN BEGIN
+		oB[idx]   = MrVar_xForm(oB[idx])
+		oE_perp   = MrVar_xForm(oE_perp)
+		oJxB[idx] = MrVar_xForm(oJxB[idx], /CACHE, NAME=jxb_vnames[idx])
+		oVexB     = MrVar_xForm(oVexB,     /CACHE, NAME=vexb_vname)
+		oVixB     = MrVar_xForm(oVixB,     /CACHE, NAME=vixb_vname)
+		oJ[idx]   = MrVar_xForm(oJ[idx],   /CACHE, NAME=j_vnames[idx])
+		comps   = ['N', 'M', 'L']
+	ENDIF ELSE BEGIN
+		oB[idx] = oB[idx] -> Copy()
+		comps   = ['X', 'Y', 'Z']
+	ENDELSE
+	
+;-------------------------------------------
+; Properties ///////////////////////////////
+;-------------------------------------------
+	;Magnitude
+	oBmag = MrVar_Get(bmag_vnames[idx])
+	oBmag['AXIS_RANGE'] = [(oB[idx]).min, oBmag.max]
+	oBmag['TITLE']      = 'B!C(nT)'
+	
+	;Magnetic Field
+	(oB[idx])['CATDESC'] = 'Vector magnetic field.'
+	(oB[idx])['COLOR']   = ['Blue', 'Forest Green', 'Red']
+	(oB[idx])['LABEL']   = comps
+	(oB[idx])['TITLE']   = 'B!C(nT)'
+	(oB[idx])['UNITS']   = 'nT'
+	
+	;Current Density
+	(oJ[idx])['CATDESC'] = 'Current density calculated from particle moments: J=q*ne*(Vi-Ve).'
+	(oJ[idx])['COLOR']   = ['Blue', 'Forest Green', 'Red']
+	(oJ[idx])['LABEL']   = comps
+	(oJ[idx])['TITLE']   = 'J!C($\mu$A/m^2)'
+	(oJ[idx])['UNITS']   = 'uA/m^2'
+	
+	;Pepr E-field
+	oE_perp['CATDESC'] = 'Electric field perpendicular to the magnetic field.'
+	oE_perp['COLOR']   = ['Blue', 'Forest Green', 'Red']
+	oE_perp['LABEL']   = comps
+	oE_perp['TITLE']   = 'E$\down' + perp + '$!C(mV/m)'
+	oE_perp['UNITS']   = 'mV/m'
+	
+	;Hall E-field
+	(oJxB[idx])['CATDESC'] = 'E = (JxB)/(ne)'
+	(oJxB[idx])['COLOR']   = ['Blue', 'Forest Green', 'Red']
+	(oJxB[idx])['LABEL']   = comps
+	(oJxB[idx])['TITLE']   = 'JxB/ne!C(mV/m)'
+	(oJxB[idx])['UNITS']   = 'mV/m'
+	
+	;Convective E-field
+	oVexB['CATDESC'] = 'E = -VexB'
+	oVexB['COLOR']   = ['Blue', 'Forest Green', 'Red']
+	oVexB['LABEL']   = comps
+	oVexB['TITLE']   = '-VexB!C(mV/m)'
+	oVexB['UNITS']   = 'mV/m'
+	
+	;Convective E-field
 	oVixB['CATDESC'] = 'E = -VixB'
 	oVixB['COLOR']   = ['Blue', 'Forest Green', 'Red']
-	oVixB['LABEL']   = ['X', 'Y', 'Z']
-	oVixB['TITLE']   = ['-VexB!C(mV/m)']
-	oVixB['UNITS']   = ['mV/m']
+	oVixB['LABEL']   = comps
+	oVixB['TITLE']   = '-VexB!C(mV/m)'
+	oVixB['UNITS']   = 'mV/m'
 	
 ;-------------------------------------------
 ; Split E-Fields into X, Y, Z Components ///
 ;-------------------------------------------
-	oE_des -> Split, oEx, oEy, oEz, /CACHE, NAME=[ex_vname, ey_vname, ez_vname]
-	oJxB   -> Split, oJxBx, oJxBy, oJxBz, /CACHE
-	oVexB  -> Split, oVexBx, oVexBy, oVexBz, /CACHE
-	oVixB  -> Split, oVixBx, oVixBy, oVixBz, /CACHE
+	oE[idx]   -> Split, oEx, oEy, oEz, /CACHE, NAME=[ex_vname, ey_vname, ez_vname]
+	oE_perp   -> Split, oEx_perp, oEy_perp, oEz_perp, /CACHE, NAME=[eperpx_vname, eperpy_vname, eperpz_vname]
+	oJxB[idx] -> Split, oJxBx, oJxBy, oJxBz, /CACHE
+	oVexB     -> Split, oVexBx, oVexBy, oVexBz, /CACHE
+	oVixB     -> Split, oVixBx, oVixBy, oVixBz, /CACHE
+	
+	;Axis range
+	Exrange = [ Min( [oEx_perp.min, oVexBx.min, oVixBx.min, oJxBx.min] ), $
+	            Max( [oEx_perp.max, oVexBx.max, oVixBx.max, oJxBx.max] ) ]
+	Eyrange = [ Min( [oEy_perp.min, oVexBy.min, oVixBy.min, oJxBy.min] ), $
+	            Max( [oEy_perp.max, oVexBy.max, oVixBy.max, oJxBy.max] ) ]
+	Ezrange = [ Min( [oEz_perp.min, oVexBz.min, oVixBz.min, oJxBz.min] ), $
+	            Max( [oEz_perp.max, oVexBz.max, oVixBz.max, oJxBz.max] ) ]
 	
 	;E
-	oEx['LABEL'] = 'E'
-	oEx['TITLE'] = 'Ex!C(mV/m)'
+	oEx['AXIS_RANGE'] = Exrange
+	oEx['LABEL']      = 'E'
+	oEx['TITLE']      = 'E$\down' + comps[0] + '$!C(mV/m)'
 	
-	oEy['LABEL'] = 'E'
-	oEy['TITLE'] = 'Ey!C(mV/m)'
+	oEy['AXIS_RANGE'] = Eyrange
+;	oEy['LABEL']      = 'E'
+	oEy['TITLE']      = 'E$\down' + comps[1] + '$!C(mV/m)'
 	
-	oEz['LABEL'] = 'E'
-	oEz['TITLE'] = 'Ez!C(mV/m)'
+	oEz['AXIS_RANGE'] = Ezrange
+;	oEz['LABEL']      = 'E'
+	oEz['TITLE']      = 'E$\down' + comps[2] + '$!C(mV/m)'
+	
+	;Eperp
+	oEx_perp['AXIS_RANGE'] = Exrange
+	oEx_perp['LABEL']      = 'E$\down' + perp + '$'
+	oEx_perp['TITLE']      = 'E$\down' + perp + comps[0] + '$!C(mV/m)'
+	
+	oEy_perp['AXIS_RANGE'] = Eyrange
+	oEy_perp['TITLE']      = 'E$\down' + perp + comps[1] + '$!C(mV/m)'
+	
+	oEz_perp['AXIS_RANGE'] = Ezrange
+	oEz_perp['TITLE']      = 'E$\down' + perp + comps[2] + '$!C(mV/m)'
+	
 	
 	;JXB
 	oJxBx['COLOR'] = 'Blue'
 	oJxBx['LABEL'] = 'JxB/ne'
 	
 	oJxBy['COLOR'] = 'Blue'
-	oJxBy['LABEL'] = 'JxB/ne'
+;	oJxBy['LABEL'] = 'JxB/ne'
 	
 	oJxBz['COLOR'] = 'Blue'
-	oJxBz['LABEL'] = 'JxB/ne'
+;	oJxBz['LABEL'] = 'JxB/ne'
 	
 	;VIxB
 	oVixBx['COLOR'] = 'Forest Green'
 	oVixBx['LABEL'] = '-VixB'
 	
 	oVixBy['COLOR'] = 'Forest Green'
-	oVixBy['LABEL'] = '-VixB'
+;	oVixBy['LABEL'] = '-VixB'
 	
 	oVixBz['COLOR'] = 'Forest Green'
-	oVixBz['LABEL'] = '-VixB'
+;	oVixBz['LABEL'] = '-VixB'
 	
 	;VexB
 	oVexBx['COLOR'] = 'Red'
 	oVexBx['LABEL'] = '-VexB
 	
 	oVexBy['COLOR'] = 'Red'
-	oVexBy['LABEL'] = '-VexB
+;	oVexBy['LABEL'] = '-VexB
 	
 	oVexBz['COLOR'] = 'Red'
-	oVexBz['LABEL'] = '-VexB
+;	oVexBz['LABEL'] = '-VexB
 	
 ;-------------------------------------------
 ; Properties ///////////////////////////////
 ;-------------------------------------------
-	oNi = MrVar_Get(ni_vname)
-	oNe = MrVar_Get(ne_vname)
+	oNi = MrVar_Get(ni_vnames[idx])
+	oNe = MrVar_Get(ne_vnames[idx])
 	oNi['AXIS_RANGE'] = [ Min([oNi.min, oNe.min]), Max([oNi.max, oNe.max]) ]
 	oNi['COLOR']      = 'Blue'
 	oNi['LABEL']      = 'Ni'
@@ -399,25 +530,27 @@ TRANGE=trange
 
 
 	title = StrUpCase(StrJoin([sc, mode, level, 'Hall'], ' '))
-	oEx['PLOT_TITLE'] = title
+	oEx_perp['PLOT_TITLE'] = title
 
 ;-------------------------------------------
 ; Plot Data ////////////////////////////////
 ;-------------------------------------------
 	;Plot data
-	win = MrVar_PlotTS( [ex_vname, ey_vname, ez_vname, ni_vname, bvec_vname, j_vname, rho_vname], $
+	win = MrVar_PlotTS( [oEx_perp, oEy_perp, oEz_perp, oNi, oBmag, oJ[idx], oRho], $ ;[ex_vname, ey_vname, ez_vname, ni_vname, bvec_vname, j_vname, rho_vname], $
 	                    /NO_REFRESH, $
 	                    XSIZE = 600, $
 	                    YSIZE = 700 )
-	win = MrVar_OPlotTS( ex_vname, [vixbx_vname, vexbx_vname, jxbx_vname] )
-	win = MrVar_OPlotTS( ey_vname, [vixby_vname, vexby_vname, jxby_vname] )
-	win = MrVar_OPlotTS( ez_vname, [vixbz_vname, vexbz_vname, jxbz_vname] )
-	win = MrVar_OPlotTS( ni_vname, ne_vname )
+	win = MrVar_OPlotTS( bmag_vnames[idx], oB[idx] )
+	win = MrVar_OPlotTS( eperpx_vname, [ vixbx_vname, vexbx_vname, jxbx_vnames[idx] ] )
+	win = MrVar_OPlotTS( eperpy_vname, [ vixby_vname, vexby_vname, jxby_vnames[idx] ] )
+	win = MrVar_OPlotTS( eperpz_vname, [ vixbz_vname, vexbz_vname, jxbz_vnames[idx] ] )
+	win = MrVar_OPlotTS( ni_vnames[idx], ne_vnames[idx] )
+	win = MrVar_OPlotTS( rho_vname, div_jxb_vname )
 	
 	;Pretty-up the window
 	win[0] -> SetLayout, [1,1]
 	win    -> TrimLayout
-	win    -> SetProperty, OXMARGIN=[13, 9]
+	win    -> SetProperty, OXMARGIN=[13, 12]
 	win    -> Refresh
 
 ;-------------------------------------------

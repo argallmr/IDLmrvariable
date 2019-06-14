@@ -197,7 +197,7 @@ TRANGE=trange
 	
 	;Alfven Speed
 	;   - 1e-6 to m/s, 1e-3 to km/s
-	oVA = 1e-12 * oB / Sqrt( mu0 * MrConstants(mass) * oN['DATA'] )
+	oVA = 1e-15 * oB / Sqrt( mu0 * MrConstants(mass) * oN['DATA'] )
 	
 	;Ratio of plasma to cyclotron frequencies
 	ofp_fc = f_p / f_c

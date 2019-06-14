@@ -40,7 +40,8 @@
 ;       4. Ex MMS 1-4
 ;       5. Ey MMS 1-4
 ;       6. Ez MMS 1-4
-;       7. Charge density: e0 * Div(E)
+;       7. J = Curl(B)
+;       8. Charge density: e0 * Div(E) / q
 ;
 ; :Categories:
 ;   MMS
@@ -79,15 +80,284 @@
 ; :History:
 ;   Modification History::
 ;       2018/02/16  -   Written by Matthew Argall
+;       2018/10/15  -   Resample data instead of interpolate. Rotate to LMN. Add DiV(E)
+;                           visual. - MRA
+;-
+FUNCTION MrMMS_Plot_4sc_Rho_Div, aoR, aoE, t_ref, $
+COMPS=comps, $
+OUTPUT_DIR=output_dir, $
+OUTPUT_EXT=output_ext
+	Compile_Opt idl2
+	On_Error, 2
+	
+	IF N_Elements(cOmps) EQ 0 THEN comps = ['X', 'Y', 'Z']
+	sc_colors = ['Black', 'Red', 'Forest Green', 'Blue']
+	
+	;Which location to display
+	it = (aoR[0])['TIMEVAR'] -> Value_Locate(t_ref)
+
+;-------------------------------------------
+; Separation ///////////////////////////////
+;-------------------------------------------
+	
+	;Finally, take the mean position
+	r1 = Reform( (aoR[0])['DATA',it,*] )
+	r2 = Reform( (aoR[1])['DATA',it,*] )
+	r3 = Reform( (aoR[2])['DATA',it,*] )
+	r4 = Reform( (aoR[3])['DATA',it,*] )
+
+	;First, find the barycenter
+	r_bary = (r1 + r2 + r3 + r4) / 4.0
+	
+	;Next, find separation relative to barycenter
+	r1 = r1 - r_bary
+	r2 = r2 - r_bary
+	r3 = r3 - r_bary
+	r4 = r4 - r_bary
+
+;-------------------------------------------
+; E-Field //////////////////////////////////
+;-------------------------------------------
+	E1 = (aoE[0])['DATA',it,*]
+	E2 = (aoE[1])['DATA',it,*]
+	E3 = (aoE[2])['DATA',it,*]
+	E4 = (aoE[3])['DATA',it,*]
+	
+;-------------------------------------------
+; Plot the Positions ///////////////////////
+;-------------------------------------------
+	win = MrWindow( ASPECT   = 1.0, $
+	                LAYOUT   = [3,1], $
+	                OXMARGIN = [10,8], $
+	                NAME     = '4sc-DivE-Sep', $
+	                REFRESH  = 0, $
+	                XGAP     = 6, $
+	                XSIZE    = 1000, $
+	                YGAP     = 0, $
+	                YSIZE    = 300 )
+	                
+	pos = MrLayout( [3,1], $
+	                ASPECT   = 1.0, $
+	                CHARSIZE = 2.0, $
+	                OXMARGIN = [10,8], $
+	                WDIMS    = [1000,300], $
+	                XGAP     = 6, $
+	                YGAP     = 0 )
+	
+	xrange = [ Min([r1[0], r2[0], r3[0], r4[0]]), Max([r1[0], r2[0], r3[0], r4[0]]) ]
+	yrange = [ Min([r1[1], r2[1], r3[1], r4[1]]), Max([r1[1], r2[1], r3[1], r4[1]]) ]
+	zrange = [ Min([r1[2], r2[2], r3[2], r4[2]]), Max([r1[2], r2[2], r3[2], r4[2]]) ]
+	
+	;XY
+	range  = [ Min([xrange[0], yrange[0]]), Max([xrange[1], yrange[1]]) ] * 1.15
+	zvalue = 3 * ([r1[2], r2[2], r3[2], r4[2]] + abs(zrange[0])) / (zrange[1] - zrange[0]) + 1
+	
+;-------------------------------------------
+; X-Y Plane ////////////////////////////////
+;-------------------------------------------
+	
+	;MMS1
+	p1 = MrPlot( r1[0], r1[1], $
+	             /CURRENT, $
+	             COLOR    = sc_colors[0], $
+;	             LAYOUT   = [1,1], $
+	             NAME     = StrJoin(comps[[0,1]]) + ' MMS1', $
+	             POSITION = pos[*,1], $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[0], $
+	             TITLE    = title, $
+	             XRANGE   = Reverse(range), $
+	             XTITLE   = '$\Delta$' + comps[0] + ' (km)', $
+	             YRANGE   = range, $
+	             YTITLE   = '$\Delta$' + comps[1] + ' (km)' )
+	
+	;MMS2
+	p2 = MrPlot( r2[0], r2[1], $
+	             COLOR    = sc_colors[1], $
+	             NAME     = StrJoin(comps[[0,1]]) + ' MMS2', $
+	             OVERPLOT = p1, $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[1] )
+	
+	;MMS3
+	p3 = MrPlot( r3[0], r3[1], $
+	             COLOR    = sc_colors[2], $
+	             NAME     = StrJoin(comps[[0,1]]) + ' MMS3', $
+	             OVERPLOT = p1, $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[2] )
+	
+	;MMS4
+	p4 = MrPlot( r4[0], r4[1], $
+	             COLOR    = sc_colors[3], $
+	             NAME     = StrJoin(comps[[0,1]]) + ' MMS4', $
+	             OVERPLOT = p1, $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[3])
+	
+	;E-vectors
+	Ex = [ E1[0], E2[0], E3[0], E4[0] ]
+	rx = [ r1[0], r2[0], r3[0], r4[0] ]
+	Ey = [ E1[1], E2[1], E3[1], E4[1] ]
+	ry = [ r1[1], r2[1], r3[1], r4[1] ]
+	v1 = MrVector( Ex, Ey, rx, ry, $
+	               NAME          = 'Vector ' + StrJoin(comps[[0,1]]), $
+	               OVERPLOT      = p1 )
+	
+;-------------------------------------------
+; X-Z Plane ////////////////////////////////
+;-------------------------------------------
+	
+	;XZ
+	range  = [ Min([xrange[0], zrange[0]]), Max([xrange[1], zrange[1]]) ] * 1.15
+	zvalue = 3 * ([r1[1], r2[1], r3[1], r4[1]] + abs(yrange[0])) / (yrange[1] - yrange[0]) + 1
+	
+	p5 = MrPlot( r1[0], r1[2], $
+	             /CURRENT, $
+	             COLOR    = sc_colors[0], $
+;	             LAYOUT   = [1,1], $
+	             NAME     = StrJoin(comps[[0,2]]) + ' MMS1', $
+	             POSITION = pos[*,0], $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[0], $
+	             XRANGE   = Reverse(range), $
+	             XTITLE   = '$\Delta$' + comps[0] + ' (km)', $
+	             YRANGE   = range, $
+	             YTITLE   = '$\Delta$' + comps[2] + ' (km)' )
+
+	p6 = MrPlot( r2[0], r2[2], $
+	             COLOR    = sc_colors[1], $
+	             NAME     = StrJoin(comps[[0,2]]) + ' MMS2', $
+	             OVERPLOT = p5, $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[1] )
+	
+	p7 = MrPlot( r3[0], r3[2], $
+	             COLOR    = sc_colors[2], $
+	             NAME     = StrJoin(comps[[0,2]]) + ' MMS3', $
+	             OVERPLOT = p5, $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[2] )
+	
+	p8 = MrPlot( r4[0], r4[2], $
+	             COLOR    = sc_colors[3], $
+	             NAME     = StrJoin(comps[[0,2]]) + ' MMS4', $
+	             OVERPLOT = p5, $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[3] )
+	
+	;E-vectors
+	Ex = [ E1[0], E2[0], E3[0], E4[0] ]
+	rx = [ r1[0], r2[0], r3[0], r4[0] ]
+	Ez = [ E1[2], E2[2], E3[2], E4[2] ]
+	rz = [ r1[2], r2[2], r3[2], r4[2] ]
+	v2 = MrVector( Ex, Ez, rx, rz, $
+	               NAME          = 'Vector ' + StrJoin(comps[[0,2]]), $
+	               OVERPLOT      = p5 )
+	
+;-------------------------------------------
+; Y-Z Plane ////////////////////////////////
+;-------------------------------------------
+	
+	;YZ
+	range  = [ Min([yrange[0], zrange[0]]), Max([yrange[1], zrange[1]]) ] * 1.15
+	zvalue = 3 * ([r1[0], r2[0], r3[0], r4[0]] + abs(xrange[0])) / (xrange[1] - xrange[0]) + 1
+	
+	p9 = MrPlot( r1[1], r1[2], $
+	             /CURRENT, $
+	             COLOR    = sc_colors[0], $
+;	             LAYOUT   = [1,1], $
+	             NAME     = StrJoin(comps[[1,2]]) + ' MMS1', $
+	             POSITION = pos[*,2], $
+	             PSYM     = 'FilledCircle', $
+	             SYMSIZE  = zvalue[0], $
+	             XRANGE   = range, $
+	             XTITLE   = '$\Delta$' + comps[1] + ' (km)', $
+	             YRANGE   = range, $
+	             YTITLE   = '$\Delta$' + comps[2] + ' (km)' )
+
+	p10 = MrPlot( r2[1], r2[2], $
+	              COLOR    = sc_colors[1], $
+	              NAME     = StrJoin(comps[[1,2]]) + ' MMS2', $
+	              OVERPLOT = p9, $
+	              PSYM     = 'FilledCircle', $
+	              SYMSIZE  = zvalue[1], $
+	              XRANGE   = range, $
+	              YRANGE   = range )
+	
+	p11 = MrPlot( r3[1], r3[2], $
+	              COLOR    = sc_colors[2], $
+	              NAME     = StrJoin(comps[[1,2]]) + ' MMS3', $
+	              OVERPLOT = p9, $
+	              PSYM     = 'FilledCircle', $
+	              SYMSIZE  = zvalue[2], $
+	              XRANGE   = range, $
+	              YRANGE   = range )
+	
+	p12 = MrPlot( r4[1], r4[2], $
+	              COLOR    = sc_colors[3], $
+	              NAME     = StrJoin(comps[[1,2]]) + ' MMS4', $
+	              OVERPLOT = p9, $
+	              PSYM     = 'FilledCircle', $
+	              SYMSIZE  = zvalue[3], $
+	              XRANGE   = range, $
+	              YRANGE   = range )
+	;E-vectors
+	Ex = [ E1[1], E2[1], E3[1], E4[1] ]
+	rx = [ r1[1], r2[1], r3[1], r4[1] ]
+	Ey = [ E1[2], E2[2], E3[2], E4[2] ]
+	ry = [ r1[2], r2[2], r3[2], r4[2] ]
+	v3 = MrVector( Ex, Ey, rx, ry, $
+	               NAME          = 'Vector ' + StrJoin(comps[[1,2]]), $
+	               OVERPLOT      = p9 )
+	
+	;Legend
+	l1 = MrLegend( ALIGNMENT    = 'NW', $
+	               FILL_COLOR   = '', $
+	               LABEL        = 'MMS' + ['1', '2', '3', '4'], $
+	               LINESTYLE    = 'None', $
+	               POSITION     = [1.0, 1.0], $
+	               /RELATIVE, $
+	               SAMPLE_WIDTH = 0, $
+	               SYMBOL       = 'FilledCircle', $
+	               /SYM_CENTER, $
+	               SYM_COLOR    = sc_colors, $
+	               TARGET       = p9, $
+	               TEXT_COLOR   = sc_colors )
+	
+	;Title
+	tt     = StrMid(t_ref, 0, 10) + ' ' + StrMid(t_ref, 11)
+	title  = 'MMS Tetrahedron ' + tt
+	t1     = MrText( 0.5, 0.91, title, $
+	                 ALIGNMENT = 0.5, $
+	                 CHARSIZE  = 2.0, $
+	                 /CURRENT, $
+	                 /NORMAL )
+
+;-------------------------------------------
+; Done! ////////////////////////////////////
+;-------------------------------------------
+	win -> Refresh
+	win -> Refresh ;Needs a second refresh for the vectors to appear
+
+	RETURN, win
+END
+
+
+;+
+;
 ;-
 FUNCTION MrMMS_Plot_4sc_Rho, mode, $
+COORDS=coords, $
 FC = fc, $
 FGM_INSTR = fgm_instr, $
+EDP_OPTDESC = edp_optdesc, $
 EPHDESC=ephdesc, $
 LEVEL=level, $
 OUTPUT_DIR=output_dir, $
 OUTPUT_EXT=output_ext, $
 NO_LOAD=no_load, $
+T_DIV=t_div, $
 TRANGE=trange
 	Compile_Opt idl2
 	
@@ -100,11 +370,12 @@ TRANGE=trange
 	ENDIF
 	
 	tf_load   = ~Keyword_Set(no_load)
-	IF N_Elements(fgm_instr) EQ 0 THEN fgm_instr = mode EQ 'brst' ? 'fsm' : 'fgm'
-	IF N_Elements(coords)    EQ 0 THEN coords    = 'gse'
-	IF N_Elements(fc)        EQ 0 THEN fc        = 0.0
-	IF N_Elements(level)     EQ 0 THEN level     = 'l2'
-	IF N_Elements(trange)    GT 0 THEN MrVar_SetTRange, trange
+	IF N_Elements(fgm_instr)   EQ 0 THEN fgm_instr   = 'fgm'
+	IF N_Elements(edp_optdesc) EQ 0 THEN edp_optdesc = 'dce' 
+	IF N_Elements(coords)      EQ 0 THEN coords      = 'gse'
+	IF N_Elements(fc)          EQ 0 THEN fc          = 0.0
+	IF N_Elements(level)       EQ 0 THEN level       = 'l2'
+	IF N_Elements(trange)      GT 0 THEN MrVar_SetTRange, trange
 	
 	;EPHDESC
 	IF N_Elements(ephdesc) EQ 0 THEN BEGIN
@@ -116,15 +387,23 @@ TRANGE=trange
 	e0        = MrConstants('epsilon_0')
 	mu0       = MrConstants('mu_0')
 	q         = MrConstants('q')
-	sc_colors = ['Black', 'Red', 'Green', 'Blue']
+	perp      = '!9' + String(120B) + '!X'
+	sc_colors = ['Black', 'Red', 'Forest Green', 'Blue']
 
 ;-------------------------------------------
 ; Variable Parameters //////////////////////
 ;-------------------------------------------
 	;FGM
-	fgm_mode    = mode EQ 'brst' ? mode : 'srvy'
+	fgm_mode    = 'srvy' ;mode EQ 'brst' ? mode : 'srvy'
 	fgm_coords  = MrIsMember(['dsl', 'dbcs'], coords) ? 'dmpa' : coords
 	fgm_optdesc = fgm_instr EQ 'fsm' ? '8khz' : ''
+	CASE coords OF
+		'dsl':  fgm_coords = 'dmpa'
+		'dbcs': fgm_coords = 'dmpa'
+		'gse':  fgm_coords = coords
+		'gsm':  fgm_coords = coords
+		ELSE:   fgm_coords = 'gse'
+	ENDCASE
 	CASE fgm_instr OF
 		'fsm': fgm_level = 'l3'
 		'fgm': fgm_level = 'l2'
@@ -135,12 +414,29 @@ TRANGE=trange
 	
 	;EDP
 	edp_instr  = 'edp'
-	edp_coords = MrIsMember(['dmpa', 'dbcs'], coords) ? 'dsl' : coords
 	edp_mode   = mode
 	IF mode EQ 'srvy' THEN BEGIN
 		MrPrintF, 'LogWarn', 'EDP does not have "srvy" data. Using "fast".'
 		edp_mode = 'fast'
 	ENDIF
+	CASE coords OF
+		'dmpa': edp_coords = 'dsl'
+		'dbcs': edp_coords = 'dsl'
+		'gse':  edp_coords = coords
+		'gsm':  Message, 'EDP does not have GSM coordinates available.'
+		ELSE:   edp_coords = 'gse'
+	ENDCASE
+	IF edp_optdesc EQ 'hmfe' THEN edp_coords = 'dsl'
+	
+	;EPH
+	CASE coords OF
+		'dmpa': eph_coords = 'dsl'
+		'dbcs': eph_coords = 'dsl'
+		'dsl':  eph_coords = 'dsl'
+		'gse':  eph_coords = coords
+		'gsm':  eph_coords = coords
+		ELSE:   eph_coords = 'gse'
+	ENDCASE
 	
 ;-------------------------------------------
 ; Variable Names ///////////////////////////
@@ -155,9 +451,9 @@ TRANGE=trange
 		bvec_vnames = sc + '_' + StrJoin([fgm_instr, 'bvec', fgm_coords, fgm_mode, fgm_level], '_') 
 		bmag_vnames = sc + '_' + StrJoin([fgm_instr, 'bmag', fgm_coords, fgm_mode, fgm_level], '_')
 	ENDELSE
-	e_vnames    = sc + '_' + StrJoin([edp_instr, 'dce',  edp_coords, edp_mode, level], '_' )
+	e_vnames    = sc + '_' + StrJoin([edp_instr, edp_optdesc, edp_coords, edp_mode, level], '_' )
 	IF Array_Equal(ephdesc EQ ['defeph', 'predeph'], 0) $
-		THEN r_vnames    = sc + '_' + StrJoin( ['mec', 'r', coords], '_' ) $
+		THEN r_vnames    = sc + '_' + StrJoin( ['mec', 'r', eph_coords], '_' ) $
 		ELSE r_vnames    = StrUpCase(sc) + '_' + StrUpCase(ephdesc) + '_' + 'R'
 	
 	;Output names
@@ -167,6 +463,10 @@ TRANGE=trange
 	ex_vnames = e_vnames    + '_x'
 	ey_vnames = e_vnames    + '_y'
 	ez_vnames = e_vnames    + '_z'
+	e_perp_vnames  = sc + '_' + StrJoin([edp_instr, edp_optdesc, 'perp', edp_mode, level], '_' )
+	ex_perp_vnames = e_perp_vnames + '_x'
+	ey_perp_vnames = e_perp_vnames + '_y'
+	ez_perp_vnames = e_perp_vnames + '_z'
 	j_vname   = StrJoin( ['mms', fgm_instr,   'j',   fgm_coords, fgm_mode, fgm_level], '_' )
 	rho_vname = StrJoin( ['mms', 'dce',     'rho', edp_mode, level], '_' )
 		
@@ -191,8 +491,8 @@ TRANGE=trange
 		
 		;E-Field
 		MrMMS_Load_Data, '', edp_instr, edp_mode, level, $
-		                 OPTDESC   = 'dce', $
-		                 VARFORMAT = '*dce_'+edp_coords+'*'
+		                 OPTDESC   = edp_optdesc, $
+		                 VARFORMAT = '*'+edp_optdesc+'_'+edp_coords+'*'
 		
 		;MEC
 		IF mode EQ 'brst' THEN BEGIN
@@ -208,114 +508,196 @@ TRANGE=trange
 	ENDIF
 	
 ;-------------------------------------------
-; Split Vectors into Components ////////////
+; Components & Resample ////////////////////
 ;-------------------------------------------
+	;Reference times for resampling
+	;   - Resample to B for current density
+	;   - Resample to E for charge density
+	oB = MrVar_Get(bvec_vnames[0])
+;	oE = MrVar_Get(e_vnames[0])
+	oTref_B = oB['TIMEVAR']
+;	oTref_E = oE['TIMEVAR']
+	
+	;Axis ranges
 	bx_range = [!Values.F_Infinity, -!Values.F_Infinity]
 	by_range = [!Values.F_Infinity, -!Values.F_Infinity]
 	bz_range = [!Values.F_Infinity, -!Values.F_Infinity]
 	ex_range = [!Values.F_Infinity, -!Values.F_Infinity]
 	ey_range = [!Values.F_Infinity, -!Values.F_Infinity]
 	ez_range = [!Values.F_Infinity, -!Values.F_Infinity]
+	ex_perp_range = [!Values.F_Infinity, -!Values.F_Infinity]
+	ey_perp_range = [!Values.F_Infinity, -!Values.F_Infinity]
+	ez_perp_range = [!Values.F_Infinity, -!Values.F_Infinity]
 	
+	aoB   = ObjArr(4)
+	aoE   = ObjArr(4)
+	aoEperp = ObjArr(4)
+	aoPos = ObjArr(4)
+	aoR_E = ObjArr(4)
 	FOR i = 0, 3 DO BEGIN
-		oB = MrVar_Get(bvec_vnames[i])
-		IF oB -> HasAttr('MIN_VALUE') THEN oB -> RemoveAttr, ['MIN_VALUE', 'MAX_VALUE']
-		oB -> Split, oBx, oBy, oBz, /CACHE
+		;Grab data
+		oB   = MrVar_Get(bvec_vnames[i])
+		oE   = MrVar_Get(e_vnames[i])
+		oPos = MrVar_Get(r_vnames[i])
+	
+	;-------------------------------------------
+	; Resample /////////////////////////////////
+	;-------------------------------------------
+		;Use MVA coordinates for B so that J is in the new system.
+		oB   = MrVar_Resample(oB,   oTref_B)
+		oPos = MrVar_Resample(oPos, oTref_B)
+		
+		;Use orignal coordinates for E because rho is a scalar
+		oE   = MrVar_Resample(oE,   oTref_B)
+		oR_E = oPos
+	
+	;-------------------------------------------
+	; Perpendicular Electric Field /////////////
+	;-------------------------------------------
+;		oTx = MrVar_FAC(oB)
+;		oE_perp      = oTx ## oE
+;		oE_perp[*,2] = 0.0
+;		oE_perp      = (oTx -> Transpose()) ## oE_perp
+;		oE_perp -> SetName, e_perp_vnames[i]
+;		oE_perp -> Cache
+	
+	;-------------------------------------------
+	; Rotate ///////////////////////////////////
+	;-------------------------------------------
+		IF coords EQ 'mva' THEN BEGIN
+			aoB[i]   = MrVar_xForm(oB)
+			aoE[i]   = MrVar_xForm(oE)
+;			oE_perp  = MrVar_xForm(oE_perp)
+			aoPos[i] = MrVar_xForm(oPos)
+			aoR_E[i] = aoPos[i]
+			comps    = ['N', 'M', 'L']
+		ENDIF ELSE BEGIN
+			aoB[i]   = oB   ;oB -> Copy()
+			aoE[i]   = oE   ;oE -> Copy()
+			aoPos[i] = oPos ;oPos -> Copy()
+			aoR_E[i] = oPos
+			comps    = ['X', 'Y', 'Z']
+		ENDELSE
+	
+	;-------------------------------------------
+	; Split Into Components ////////////////////
+	;-------------------------------------------
+		IF aoB[i] -> HasAttr('MIN_VALUE') THEN aoB[i] -> RemoveAttr, ['MIN_VALUE', 'MAX_VALUE']
+		aoB[i] -> Split, oBx, oBy, oBz, /CACHE
+		aoE[i] -> Split, oEx, oEy, oEz, /CACHE
+;		oE_perp -> Split, oEx_perp, oEy_perp, oEz_perp, /CACHE
+		
+		;Bx
+		oBx -> SetName, bx_vnames[i]
 		oBx['COLOR'] = sc_colors[i]
-		oBy['COLOR'] = sc_colors[i]
-		oBz['COLOR'] = sc_colors[i]
 		oBx['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
-;		oBy['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
-;		oBz['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
-		oBx['TITLE'] = 'Bx!C(nT)'
-		oBy['TITLE'] = 'By!C(nT)'
-		oBz['TITLE'] = 'Bz!C(nT)'
+		oBx['TITLE'] = 'B$\down' + comps[0] + '$!C(nT)'
 		bx_range[0] <= oBx.min
-		by_range[0] <= oBy.min
-		bz_range[0] <= oBz.min
 		bx_range[1] >= oBx.max
+		
+		;By
+		oBy -> SetName, by_vnames[i]
+		oBy['COLOR'] = sc_colors[i]
+;		oBy['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
+		oBy['TITLE'] = 'B$\down' + comps[1] + '$!C(nT)'
+		by_range[0] <= oBy.min
 		by_range[1] >= oBy.max
+		
+		;Bz
+		oBz -> SetName, bz_vnames[i]
+		oBz['COLOR'] = sc_colors[i]
+;		oBz['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
+		oBz['TITLE'] = 'B$\down' + comps[2] + '$!C(nT)'
+		bz_range[0] <= oBz.min
 		bz_range[1] >= oBz.max
 		
-		oE = MrVar_Get(e_vnames[i])
-		oE -> Split, oEx, oEy, oEz, /CACHE
+		;Ex
+		oEx -> SetName, ex_vnames[i]
 		oEx['COLOR'] = sc_colors[i]
-		oEy['COLOR'] = sc_colors[i]
-		oEz['COLOR'] = sc_colors[i]
 ;		oEx['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
-;		oEy['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
-;		oEz['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
-		oEx['TITLE'] = 'Ex!C(mV/m)'
-		oEy['TITLE'] = 'Ey!C(mV/m)'
-		oEz['TITLE'] = 'Ez!C(mV/m)'
+		oEx['TITLE'] = 'E$\down' + comps[0] + '$!C(mV/m)'
 		ex_range[0] <= oEx.min
-		ey_range[0] <= oEy.min
-		ez_range[0] <= oEz.min
 		ex_range[1] >= oEx.max
+		
+		;Ey
+		oEy -> SetName, ey_vnames[i]
+		oEy['COLOR'] = sc_colors[i]
+;		oEy['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
+		oEy['TITLE'] = 'E$\down' + comps[1] + '$!C(mV/m)'
+		ey_range[0] <= oEy.min
 		ey_range[1] >= oEy.max
+		
+		;Ez
+		oEz -> SetName, ez_vnames[i]
+		oEz['COLOR'] = sc_colors[i]
+;		oEz['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
+		oEz['TITLE'] = 'E$\down' + comps[2] + '$!C(mV/m)'
+		ez_range[0] <= oEz.min
 		ez_range[1] >= oEz.max
+		
+		;Ex-perp
+;		oEx_perp -> SetName, ex_perp_vnames[i]
+;		oEx_perp['COLOR'] = sc_colors[i]
+;		oEx_perp['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
+;		oEx_perp['TITLE'] = 'E$\down' + perp + comps[0] + '$!C(mV/m)'
+;		ex_perp_range[0] <= oEx_perp.min
+;		ex_perp_range[1] >= oEx_perp.max
+		
+		;Ey-perp
+;		oEy_perp -> SetName, ey_perp_vnames[i]
+;		oEy_perp['COLOR'] = sc_colors[i]
+;		oEy_perp['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
+;		oEy_perp['TITLE'] = 'E$\down' + perp + comps[1] + '$!C(mV/m)'
+;		ey_perp_range[0] <= oEy_perp.min
+;		ey_perp_range[1] >= oEy_perp.max
+		
+		;Ez-perp
+;		oEz_perp -> SetName, ez_perp_vnames[i]
+;		oEz_perp['COLOR'] = sc_colors[i]
+;		oEz_perp['LABEL'] = 'MMS' + String(i+1, FORMAT='(i1)')
+;		oEz_perp['TITLE'] = 'E$\down' + perp + comps[2] + '$!C(mV/m)'
+;		ez_perp_range[0] <= oEz_perp.min
+;		ez_perp_range[1] >= oEz_perp.max
 	ENDFOR
 	
 ;-------------------------------------------
 ; Charge Density ///////////////////////////
 ;-------------------------------------------
-	;Get E-field
-	oE1 = MrVar_Get(e_vnames[0])
-	oE2 = MrVar_Get(e_vnames[1])
-	oE3 = MrVar_Get(e_vnames[2])
-	oE4 = MrVar_Get(e_vnames[3])
-	
-	;Get Position
-	oR1 = MrVar_Get(r_vnames[0])
-	oR2 = MrVar_Get(r_vnames[1])
-	oR3 = MrVar_Get(r_vnames[2])
-	oR4 = MrVar_Get(r_vnames[3])
-	
-	;Interpolate to MMS1
-	oE2 = oE2 -> Interpol(oE1)
-	oE3 = oE3 -> Interpol(oE1)
-	oE4 = oE4 -> Interpol(oE1)
-	oR1 = oR1 -> Interpol(oE1)
-	oR2 = oR2 -> Interpol(oE1)
-	oR3 = oR3 -> Interpol(oE1)
-	oR4 = oR4 -> Interpol(oE1)
 	
 	;Reciprocal vectors for taking derivatives
-	oRecipVec = MrVar_RecipVec(oR1, oR2, oR3, oR4)
+	oRecipVec = MrVar_RecipVec(aoR_E[0], aoR_E[1], aoR_E[2], aoR_E[3])
 	
 	;Charge Density
 	;   - 1e10 converts to uC/cm^2
-	oRho = (e0 / q * 1e-12) * oRecipVec -> Divergence( oE1, oE2, oE3, oE4 )
+	oRho = (e0 / q * 1e-12) * oRecipVec -> Divergence(aoE[0], aoE[1], aoE[2], aoE[3])
 	oRho -> SetName, rho_vname
 	oRho -> Cache
 	oRho['CATDESC'] = 'Free charge density, computed from the divergence of the electric field.'
-	oRho['TITLE']   = '$\Delta$#!C(#/cm^3)'
-	oRho['UNITS']   = '#/cm^3'
+	oRho['TITLE']   = '$\rho$/e!C(cm$\up-3$)'
+	oRho['UNITS']   = 'cm^-3'
+	
+	;Free memory
+	Obj_Destroy, oRecipVec
 	
 ;-------------------------------------------
 ; Curlometer ///////////////////////////////
 ;-------------------------------------------
-	;Get B-Field
-	oB1 = MrVar_Get(bvec_vnames[0])
-	oB2 = MrVar_Get(bvec_vnames[1])
-	oB3 = MrVar_Get(bvec_vnames[2])
-	oB4 = MrVar_Get(bvec_vnames[3])
 	
-	;Inerpolate to E on MMS1
-	oB1 = oB1 -> Interpol(oE1)
-	oB2 = oB2 -> Interpol(oE1)
-	oB3 = oB3 -> Interpol(oE1)
-	oB4 = oB4 -> Interpol(oE1)
+	;Reciprocal vectors for taking derivatives
+	oRecipVec = MrVar_RecipVec(aoPos[0], aoPos[1], aoPos[2], aoPos[3])
 	
 	;Curlometer
-	oJ  = (1e-6/mu0) * oRecipVec -> Curl(oB1, oB2, oB3, oB4)
+	oJ  = (1e-6/mu0) * oRecipVec -> Curl(aoB[0], aoB[1], aoB[2], aoB[3])
 	oJ -> SetName, j_vname
 	oJ -> Cache
 	oJ['CATDESC'] = 'Current density derived from the curlometer technique using MEC & ' + fgm_instr + '.'
 	oJ['COLOR']   = ['Blue', 'Forest Green', 'Red']
-	oJ['LABEL']   = 'J$\down' + ['X', 'Y', 'Z'] + '$'
+	oJ['LABEL']   = 'J$\down' + comps + '$'
 	oJ['TITLE']   = 'J!C($\mu$A/m^2)'
 	oJ['UNITS']   = 'nA/m^2'
+	
+	;Free Memory
+	Obj_Destroy, oRecipVec
 	
 ;-------------------------------------------
 ; Properties ///////////////////////////////
@@ -336,6 +718,14 @@ TRANGE=trange
 	oEx['AXIS_RANGE'] = ex_range
 	oEy['AXIS_RANGE'] = ey_range
 	oEz['AXIS_RANGE'] = ez_range
+	
+	;E-perp
+;	oEx_perp = MrVar_Get(ex_perp_vnames[0])
+;	oEy_perp = MrVar_Get(ey_perp_vnames[0])
+;	oEz_perp = MrVar_Get(ez_perp_vnames[0])
+;	oEx_perp['AXIS_RANGE'] = ex_perp_range
+;	oEy_perp['AXIS_RANGE'] = ey_perp_range
+;	oEz_perp['AXIS_RANGE'] = ez_perp_range
 
 ;-------------------------------------------
 ; Plot Data ////////////////////////////////
@@ -357,20 +747,44 @@ TRANGE=trange
 	win = MrVar_OPlotTS( ez_vnames[0], ez_vnames[1:3] )
 	
 	;Add horizontal lines
-	l1 = MrPlotS(win[bx_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Bx',  TARGET=win[bx_vnames[0]])
-	l2 = MrPlotS(win[by_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: By',  TARGET=win[by_vnames[0]])
-	l3 = MrPlotS(win[bz_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Bz',  TARGET=win[bz_vnames[0]])
-	l4 = MrPlotS(win[ex_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Ex',  TARGET=win[ex_vnames[0]])
-	l5 = MrPlotS(win[ey_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Ey',  TARGET=win[ey_vnames[0]])
-	l6 = MrPlotS(win[ez_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Ez',  TARGET=win[ez_vnames[0]])
-	l7 = MrPlotS(win[j_vname].xrange,      [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: J',   TARGET=win[j_vname])
-	l8 = MrPlotS(win[rho_vname].xrange,    [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Rho', TARGET=win[rho_vname])
-		
+	l1 = MrPlotS(win[bx_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Bx', TARGET=win[bx_vnames[0]])
+	l2 = MrPlotS(win[by_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: By', TARGET=win[by_vnames[0]])
+	l3 = MrPlotS(win[bz_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Bz', TARGET=win[bz_vnames[0]])
+	l4 = MrPlotS(win[ex_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Ex', TARGET=win[ex_vnames[0]])
+	l5 = MrPlotS(win[ey_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Ey', TARGET=win[ey_vnames[0]])
+	l6 = MrPlotS(win[ez_vnames[0]].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Ez', TARGET=win[ez_vnames[0]])
+	l7 = MrPlotS(win[j_vname].xrange,   [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: J',   TARGET=win[j_vname])
+	l8 = MrPlotS(win[rho_vname].xrange, [0,0], COLOR='Magenta', LINESTYLE='--', NAME='Line: Rho', TARGET=win[rho_vname])
+	
 	;Pretty-up the window
+	win.name = '4sc-Rho'
 	win[0] -> SetLayout, [1,1]
 	win    -> TrimLayout
 	win    -> SetProperty, OXMARGIN=[13, 11]
-	win    -> Refresh
+	
+;-------------------------------------------
+; Position /////////////////////////////////
+;-------------------------------------------
+	;Default reference time
+	IF N_Elements(t_div) EQ 0 THEN BEGIN
+		!Null = Min(oRho['DATA'], iMin)
+		t_div = oRho['TIME', iMin]
+	ENDIF ELSE BEGIN
+		iMin = oRho['TIMEVAR'] -> Value_Locate(t_div)
+	ENDELSE
+	
+	;Plot positions and E-field vectors
+	w2 = MrMMS_Plot_4sc_Rho_Div( aoR_E, aoE, t_div, $
+	                             COMPS      = comps, $
+	                             OUTPUT_DIR = output_dir, $
+	                             OUTPUT_EXT = output_ext )
+	
+	;Draw line on divergence graph
+	t_ssm = oRho['TIME', iMin, 'SSM']
+	l9    = MrPlotS( Replicate(t_ssm, 2), win[rho_vname].yrange, COLOR='Magenta', LINESTYLE='--', NAME='Line: Div', TARGET=win[rho_vname])
+	
+	;Free memory
+	Obj_Destroy, aoR_E
 
 ;-------------------------------------------
 ; Save Figure //////////////////////////////
@@ -385,16 +799,20 @@ TRANGE=trange
 		ENDIF
 		
 		;File name
-		fname   = StrJoin( ['mms', edp_instr, edp_mode, level, '4sc-rho'], '_' )
-		fname   = FilePath( fname, ROOT_DIR=output_dir )
+		fname1   = StrJoin( ['mms', edp_instr, edp_mode, level, '4sc-rho'], '_' )
+		fname2   = StrJoin( ['mms', edp_instr, edp_mode, level, '4sc-divE-sep'], '_' )
+		fname1   = FilePath( fname1, ROOT_DIR=output_dir )
+		fname2   = FilePath( fname2, ROOT_DIR=output_dir )
 		
 		;Save the figure
-		fout = MrVar_PlotTS_Save( win, fname, output_ext )
+		fout1 = MrVar_PlotTS_Save( win, fname1, output_ext )
+		fout2 = MrVar_PlotTS_Save( w2, fname2, output_ext )
 	ENDIF
 
 ;-------------------------------------------
 ; Done /////////////////////////////////////
 ;-------------------------------------------
 
+	win    -> Refresh
 	RETURN, win
 END

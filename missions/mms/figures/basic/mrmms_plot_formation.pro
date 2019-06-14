@@ -131,7 +131,7 @@ TRANGE=trange
 		;MEC
 		IF eph_instr EQ 'mec' THEN BEGIN
 			;For part of the mission (2015-2016), burst mode is not available
-			IF eph_mode EQ 'brst' THEN BEGIN
+			IF ~!MrMMS.offline && eph_mode EQ 'brst' THEN BEGIN
 				IF (mrmms_get_filenames('mms1', mec_instr, eph_mode, level, OPTDESC=optdesc))[0] EQ '' $
 					THEN eph_mode = 'srvy'
 			ENDIF
@@ -176,18 +176,18 @@ TRANGE=trange
 	                LAYOUT   = [3,1], $
 	                OXMARGIN = [10,8], $
 	                REFRESH  = 0, $
- 	                XGAP     = 6, $, $
+	                XGAP     = 6, $
 	                XSIZE    = 1000, $
- 	                YGAP     = 0, $
+	                YGAP     = 0, $
 	                YSIZE    = 300 )
 	                
 	pos = MrLayout( [3,1], $
 	                ASPECT   = 1.0, $
 	                CHARSIZE = 2.0, $
 	                OXMARGIN = [10,8], $
- 	                WDIMS    = [1000,300], $
- 	                XGAP     = 6, $
- 	                YGAP     = 0 )
+	                WDIMS    = [1000,300], $
+	                XGAP     = 6, $
+	                YGAP     = 0 )
 	
 	xrange = [ Min([r1[0], r2[0], r3[0], r4[0]]), Max([r1[0], r2[0], r3[0], r4[0]]) ]
 	yrange = [ Min([r1[1], r2[1], r3[1], r4[1]]), Max([r1[1], r2[1], r3[1], r4[1]]) ]

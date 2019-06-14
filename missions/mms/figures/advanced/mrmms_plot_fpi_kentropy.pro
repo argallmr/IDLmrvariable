@@ -1,7 +1,7 @@
 ; docformat = 'rst'
 ;
 ; NAME:
-;       MrMMS_Plot_Kinetic_Entropy
+;       MrMMS_Plot_KEntropy
 ;
 ;*****************************************************************************************
 ;   Copyright (c) 2018, Matthew Argall                                                   ;
@@ -37,12 +37,13 @@
 ;   electron model, but the method of integration is different.
 ;
 ;       1. Bxyz, |B|
-;       2. density
-;       3. Entropy: S = Integral{ f ln(f) } / n
-;       4. Entropy per particle: S / n
-;       5. Entropy: Sb = P/n^(5/3)
-;       6. Scalar Pressure
-;       7. Temperature Pressure
+;       2. sn: Entropy per particle             (i,e)
+;       3. sbn: Maxwellian entropy per particle (i,e)
+;       4. Grad(sbn)                            (i,e)
+;       5. sfn: Entropy flux per particle       (i,e)
+;       6. Div(sfn)                             (i,e)
+;       7. Q: Agyrotropy parameter
+;       8: J.E'
 ;
 ; :Params:
 ;       SC:         in, required, type=string
@@ -77,8 +78,10 @@
 ; :History:
 ;   Modification History::
 ;       2018/04/03  -   Written by Matthew Argall
+;       2018/06/07  -   Use calculated moments for sB so that the comparison with
+;                           s is fair. Fix units error in calculation of sB - MRA
 ;-
-FUNCTION MrMMS_Plot_FPI_Kinetic_Entropy, sc, mode, $
+FUNCTION MrMMS_Plot_FPI_KEntropy, sc, mode, $
 COORDS=coords, $
 EPHDESC=ephdesc, $
 FGM_INSTR=fgm_instr, $
@@ -105,6 +108,9 @@ OUTPUT_EXT=output_ext
 	q     = MrConstants('q')
 	nabla = '!9' + String(71B) + '!X'
 	J2eV  = MrConstants('J2eV')
+	kB    = MrConstants('k_B')
+	m_e   = MrConstants('m_e')
+	m_i   = MrConstants('m_H')
 
 ;-------------------------------------------
 ; Instrument Parameters ////////////////////
@@ -144,17 +150,25 @@ OUTPUT_EXT=output_ext
 	r_vnames    = scraft + '_' + StrJoin( ['mec', 'r', coords], '_' )
 	
 	;Derived names
+	ni_calc_vname = StrJoin( [sc, 'dis', 'numberdensity', 'calc',             fpi_mode], '_' )
+	pi_calc_vname = StrJoin( [sc, 'dis', 'prestensor',    'calc', fpi_coords, fpi_mode], '_' )
+	ne_calc_vname = StrJoin( [sc, 'des', 'numberdensity', 'calc',             fpi_mode], '_' )
+	pe_calc_vname = StrJoin( [sc, 'des', 'prestensor',    'calc', fpi_coords, fpi_mode], '_' )
+	si_vnames     = scraft + '_' + StrJoin(['dis', 'kinetic-entropy-density',           fpi_mode], '_')
 	sni_vnames    = scraft + '_' + StrJoin(['dis', 'kinetic-entropy-per-particle',      fpi_mode], '_')
 	sfni_vnames   = scraft + '_' + StrJoin(['dis', 'kinetic-entropy-flux-per-particle', fpi_mode], '_')
-	sbi_vname     = StrJoin([sc,    'dis', 'maxwellian-entropy',           fpi_mode], '_')
-	gradsni_vname = StrJoin(['mms', 'dis', 'grad-kinetic-entropy',         fpi_mode], '_')
-	divsfni_vname = StrJoin(['mms', 'dis', 'div-kinetic-entropy-flux',     fpi_mode], '_')
-	qi_vname      = StrJoin([sc,    'dis', 'agyrotropy-factor',            fpi_mode], '_')
+	sbi_vname     = StrJoin([sc,    'dis', 'maxwellian-entropy-density',            fpi_mode], '_')
+	sbni_vname    = StrJoin([sc,    'dis', 'maxwellian-entropy-per-particle',       fpi_mode], '_')
+	gradsni_vname = StrJoin(['mms', 'dis', 'grad-kinetic-entropy-per-particle',     fpi_mode], '_')
+	divsfni_vname = StrJoin(['mms', 'dis', 'div-kinetic-entropy-flux-per-particle', fpi_mode], '_')
+	qi_vname      = StrJoin([sc,    'dis', 'agyrotropy-factor',                     fpi_mode], '_')
+	se_vnames     = scraft + '_' + StrJoin(['des', 'kinetic-entropy-density',           fpi_mode], '_')
 	sne_vnames    = scraft + '_' + StrJoin(['des', 'kinetic-entropy-per-particle',      fpi_mode], '_')
 	sfne_vnames   = scraft + '_' + StrJoin(['des', 'kinetic-entropy-flux-per-particle', fpi_mode], '_')
-	sbe_vname     = StrJoin([sc,    'des', 'maxwellian-entropy',           fpi_mode], '_')
-	gradsne_vname = StrJoin(['mms', 'des', 'grad-kinetic-entropy',         fpi_mode], '_')
-	divsfne_vname = StrJoin(['mms', 'des', 'div-kinetic-entropy-flux',     fpi_mode], '_')
+	sbe_vname     = StrJoin([sc,    'des', 'maxwellian-entropy',                    fpi_mode], '_')
+	sbne_vname    = StrJoin([sc,    'des', 'maxwellian-entropy-per-particle',       fpi_mode], '_')
+	gradsne_vname = StrJoin(['mms', 'des', 'grad-kinetic-entropy-per-particle',     fpi_mode], '_')
+	divsfne_vname = StrJoin(['mms', 'des', 'div-kinetic-entropy-flux-per-particle', fpi_mode], '_')
 	qe_vname      = StrJoin([sc,    'des', 'sqrtq',                        fpi_mode], '_')
 	j_vname       = StrJoin([sc,    'fpi', 'j',                            fpi_mode], '_')
 	eprime_vname  = StrJoin([sc,    'edp', 'eprime', edp_coords, edp_mode, level], '_')
@@ -208,7 +222,7 @@ OUTPUT_EXT=output_ext
 		;Ephemeris
 		IF mode EQ 'brst' THEN BEGIN
 			;BRST data is not always available
-			IF MrMMS_Get_FileNames(sc, 'mec', mode, level, OPTDESC=ephdesc) EQ '' $
+			IF (MrMMS_Get_FileNames(sc, 'mec', mode, level, OPTDESC=ephdesc))[0] EQ '' $
 				THEN eph_mode = 'srvy'
 		ENDIF
 		MrMMS_Load_Data, '', 'mec', eph_mode, level, $
@@ -217,30 +231,41 @@ OUTPUT_EXT=output_ext
 	ENDIF
 	
 ;-------------------------------------------
-; Kinetic Entropy per Particle /////////////
+; Loop Over Each Spacecraft ////////////////
 ;-------------------------------------------
 	
 	FOR i = 0, N_Elements(scraft) - 1 DO BEGIN
+	
+	;-------------------------------------------
+	; Entropy Per Particle /////////////////////
+	;-------------------------------------------
 		;DIS
 		;   - Convert 1/cm^3 to 1/m^3
 		;   - Convert J/K to eV/K
-		oDF  = MrDist4D(fi_vnames[i])
-		oSi  = J2eV * oDF -> Entropy()
-		oNi  = 1e6 * oDF -> Density()
-		oSni = oSi / oNi
-		Obj_Destroy, [oSi, oNi]
+		oDFi  = MrDist4D(fi_vnames[i], VSC=scpot_vname, SPECIES='H')
+		
+		;Density and pressure
+		oNi = oDFi -> Density(CACHE=(i EQ iSC), NAME=ni_calc_vname)
+		oPi = oDFi -> Pressure(CACHE=(i EQ iSC), NAME=pi_calc_vname)
+		
+		;Entropy per particle
+		oSi  = J2eV * oDFi -> Entropy(/CACHE, NAME=si_vnames[i])
+		oSni = oSi / (1e6 * oNi)
+;		Obj_Destroy, oDFi
 	
 		;DES
 		;   - Convert 1/cm^3 to 1/m^3
 		;   - Convert J/K to eV/K
-		oDF  = MrDist4D(fe_vnames[i])
-		oSe  = J2eV * oDF -> Entropy()
-		oNe  = 1e6 * oDF -> Density()
-		oSne = oSe / oNe
-		Obj_Destroy, [oSe, oNe]
-	
-		;Normalize by making the minimum values equal
-		oSni = oSni + (oSne.min - oSni.min)
+		oDFe  = MrDist4D(fe_vnames[i], VSC=scpot_vname, SPECIES='e')
+		
+		;Density and pressure
+		oNe = oDFe -> Density(CACHE=(i EQ iSC), NAME=ne_calc_vname)
+		oPe = oDFe -> Pressure(CACHE=(i EQ iSC), NAME=pe_calc_vname)
+		
+		;Entropy per particle
+		oSe  = J2eV * oDFe -> Entropy(/CACHE, NAME=se_vnames[i])
+		oSne = oSe / (1e6 * oNe)
+;		Obj_Destroy, oDFe
 	
 		;Set attributes
 		oSni -> SetName, sni_vnames[i]
@@ -250,7 +275,7 @@ OUTPUT_EXT=output_ext
 		oSni['COLOR']         = 'Blue'
 		oSni['PLOT_TITLE']    = 'Entropy per Particle'
 		oSni['LABEL']         = 'dis'
-		oSni['TITLE']         = 'S/N!C(eV/K)'
+		oSni['TITLE']         = 's/N!C(eV/K)'
 		oSni['UNITS']         = 'eV/K'
 		oSni['SI_CONVERSION'] = '1.602e-19>J/K'
 	
@@ -261,36 +286,26 @@ OUTPUT_EXT=output_ext
 		oSne['COLOR']         = 'Red'
 		oSne['PLOT_TITLE']    = 'Entropy per Particle'
 		oSne['LABEL']         = 'des'
-		oSne['TITLE']         = 'S/N!C(eV/K)'
+		oSne['TITLE']         = 's/N!C(eV/K)'
 		oSne['UNITS']         = 'eV/K'
 		oSne['SI_CONVERSION'] = '1.602e-19>J/K'
-	ENDFOR
 	
-;-------------------------------------------
-; Kinetic Entropy Flux per Particle ////////
-;-------------------------------------------
-	
-	FOR i = 0, N_Elements(scraft) - 1 DO BEGIN
+	;-------------------------------------------
+	; Entropy Flux Per Particle ////////////////
+	;-------------------------------------------
 		;DIS
 		;   - Convert J/K to eV/K
 		;   - Convert 1/cm^3 to 1/m^3
-		oDF   = MrDist4D(fi_vnames[i], SPECIES='H')
-		oSfi  = J2eV * oDF -> EntropyFlux()
-		oNi   = 1e6 * oDF -> Density()
-		oSfni = oSfi / oNi
-		Obj_Destroy, [oSfi, oNi]
+		oSfi  = J2eV * oDFi -> EntropyFlux()
+		oSfni = oSfi / (1e6 * oNi)
+		Obj_Destroy, [oDFi, oSfi]
 	
 		;DES
 		;   - Convert J m / K s to eV m / K s
 		;   - Convert 1/cm^3 to 1/m^3
-		oDF   = MrDist4D(fe_vnames[i], SPECIES='e')
-		oSfe  = J2eV * oDF -> EntropyFlux()
-		oNe   = 1e6 * oDF -> Density()
-		oSfne = oSfe / oNe
-		Obj_Destroy, [oSfe, oNe]
-		
-		;Normalize by making the minimum values equal
-;		oSfni = oSfni + (oSfne.min - oSfni.min)
+		oSfe  = J2eV * oDFe -> EntropyFlux()
+		oSfne = oSfe / (1e6 * oNe)
+		Obj_Destroy, [oDFe, oSfe]
 	
 		;Set attributes
 		oSfni -> SetName, sfni_vnames[i]
@@ -301,7 +316,7 @@ OUTPUT_EXT=output_ext
 		oSfni['PLOT_TITLE']    = 'Entropy Flux per Particle'
 		oSfni['LABEL']         = 'Sf$\down' + ['X', 'Y', 'Z'] + '$'
 		oSfni['LINESTYLE']     = '--'
-		oSfni['TITLE']         = 'Sf/N!C(eV m K$\up-1$ s$\up-1$)'
+		oSfni['TITLE']         = 'sf/N!C(eV m K$\up-1$ s$\up-1$)'
 		oSfni['UNITS']         = 'eV m K^-1 s^-1'
 		oSfni['SI_CONVERSION'] = '1.602e-19>J m K^-1 s^-1'
 	
@@ -312,7 +327,7 @@ OUTPUT_EXT=output_ext
 		oSfne['COLOR']         = ['Blue', 'Forest Green', 'Red']
 		oSfne['PLOT_TITLE']    = 'Entropy Flux per Particle'
 ;		oSfne['LABEL']         = 'des'
-		oSfne['TITLE']         = 'Sf/N!C(eV m K$\up-1$ s$\up-1$)'
+		oSfne['TITLE']         = 'sf/N!C(eV m K$\up-1$ s$\up-1$)'
 		oSfne['UNITS']         = 'eV m K^-1 s^-1'
 		oSfne['SI_CONVERSION'] = '1.602e-19>J m K^-1 s^-1'
 	ENDFOR
@@ -425,51 +440,75 @@ OUTPUT_EXT=output_ext
 	oDivSfne['SI_CONVERSION'] = '1.602e-19>J K-1 m^-1'
 
 ;-------------------------------------------
-; Maxwellian Entropy ///////////////////////
+; Maxwellian Entropy Density ///////////////
 ;-------------------------------------------
 	;DIS
 	;   1. Calculate scalar pressure
 	;   2. Calculate P/rho^gamma
-	oNi        = MrVar_Get(ni_vname)
-	oPi_tensor = MrVar_Get(pi_vname)
+	oNi        = MrVar_Get(ni_calc_vname)
+	oPi_tensor = MrVar_Get(pi_calc_vname)
 	oPi        = (oPi_tensor[*,0,0] + oPi_tensor[*,1,1] + oPi_tensor[*,2,2]) / 3.0
-	oSbi       = (1e-9 * oPi) / ( MrConstants('m_H') * 1e6 * oNi )^(5.0/3.0)
-	oSbi      -> SetData, ALog10(oSbi['DATA'])
+	oSbi       = 3.0/2.0 * kB * J2eV * 1e6 * oNi $
+	             * ALog( 2 * !pi * 1e-11 / m_i * oPi['DATA'] / oNi['DATA']^(5.0/3.0) + 1 )
 	Obj_Destroy, oPi
 	
 	;DES
 	;   1. Calculate scalar pressure
 	;   2. Calculate P/rho^gamma
-	oNe        = MrVar_Get(ne_vname)
-	oPe_tensor = MrVar_Get(pe_vname)
+	oNe        = MrVar_Get(ne_calc_vname)
+	oPe_tensor = MrVar_Get(pe_calc_vname)
 	oPe        = (oPe_tensor[*,0,0] + oPe_tensor[*,1,1] + oPe_tensor[*,2,2]) / 3.0
-	oSbe       = (1e-9 * oPe) / ( MrConstants('m_e') * 1e6 * oNe )^(5.0/3.0)
-	oSbe      -> SetData, ALog10(oSbe['DATA'])
+	oSbe       = 3.0/2.0 * kB * J2eV * 1e6 * oNe $
+	             * ALog( 2 * !pi * 1e-11 / m_e * oPe['DATA'] / oNe['DATA']^(5.0/3.0) + 1 )
 	Obj_Destroy, oPe
-	
-	;Normalize by making the minimum values equal
-	oSbi = oSbi + (oSbe.min - oSbi.min)
 	
 	;Set Attributes
 	oSbi -> SetName, sbi_vname
 	oSbi -> Cache
-	oSbi['CATDESC']       = 'Maxwellian entropy calculated as P/rho^gamma.'
+	oSbi['CATDESC']       = 'Maxwellian entropy density.'
 	oSbi['COLOR']         = 'Blue'
-	oSbi['PLOT_TITLE']    = 'Entropy per Particle'
+	oSbi['PLOT_TITLE']    = 'Entropy Density'
 	oSbi['LABEL']         = 'dis'
-	oSbi['TITLE']         = 'Log(P/$\rho$$\up5/3$)'
-	oSbi['UNITS']         = ''
-	oSbi['SI_CONVERSION'] = '>'
+	oSbi['TITLE']         = 's$\downB$!C(eV/K/m$\up3$)'
+	oSbi['UNITS']         = 'eV/K/m^3 ln(J m^2/kg)'
+	oSbi['SI_CONVERSION'] = '1.602e-19>J/K/m^3 ln(J m^2/kg)'
 	
 	oSbe -> SetName, sbe_vname
 	oSbe -> Cache
-	oSbe['CATDESC']       = 'Maxwellian entropy calculated as P/rho^gamma.'
+	oSbe['CATDESC']       = 'Maxwellian entropy density.'
 	oSbe['COLOR']         = 'Red'
-	oSbe['PLOT_TITLE']    = 'Entropy per Particle'
+	oSbe['PLOT_TITLE']    = 'Entropy Density'
 	oSbe['LABEL']         = 'des'
-	oSbe['TITLE']         = 'Log(P/$\rho$$\up5/3$)'
-	oSbe['UNITS']         = ''
-	oSbe['SI_CONVERSION'] = '>'
+	oSbe['TITLE']         = 's$\downB$!C(eV/K/m$\up3$)'
+	oSbe['UNITS']         = 'eV/K/m^3 ln(J m^2/kg)'
+	oSbe['SI_CONVERSION'] = '1.602e-19>J/K/m^3 ln(J m^2/kg)'
+
+;-------------------------------------------
+; Maxwellian Entropy per Particle //////////
+;-------------------------------------------
+	;1e-6 converts density from cm^3 to m^3
+	oSbni = 1e-6 * oSbi / oNi
+	oSbne = 1e-6 * oSbe / oNe
+	
+	oSbni -> SetName, sbni_vname
+	oSbni -> Cache
+	oSbni['CATDESC']       = 'Maxwellian entropy per particle.'
+	oSbni['COLOR']         = 'Blue'
+	oSbni['PLOT_TITLE']    = 'Entropy per Particle'
+	oSbni['LABEL']         = 'dis'
+	oSbni['TITLE']         = 's$\downB$/N!C(eV/K)'
+	oSbni['UNITS']         = 'eV/K ln(J m^2/kg)'
+	oSbni['SI_CONVERSION'] = '1.602e-19>J/K ln(J m^2/kg)'
+	
+	oSbne -> SetName, sbne_vname
+	oSbne -> Cache
+	oSbne['CATDESC']       = 'Maxwellian entropy per particle.'
+	oSbne['COLOR']         = 'Red'
+	oSbne['PLOT_TITLE']    = 'Entropy per Particle'
+	oSbne['LABEL']         = 'des'
+	oSbne['TITLE']         = 's$\downB$/N!C(eV/K)'
+	oSbne['UNITS']         = 'eV/K ln(J m^2/kg)'
+	oSbne['SI_CONVERSION'] = '1.602e-19>J/K ln(J m^2/kg)'
 	
 ;-------------------------------------------
 ; Agyrotropy Parameter /////////////////////
@@ -554,25 +593,37 @@ OUTPUT_EXT=output_ext
 ;	oSfne = MrVar_Get(sfne_vnames[isc])
 ;	oSfne['DATA'] = oSfne['DATA']*10
 	
-	;DIS Entropy Flux
+	;Kinetic Entropy per Particle
+	oSni = MrVar_Get(sni_vnames[isc])
+	oSne = MrVar_Get(sne_vnames[isc])
+	oSni['AXIS_RANGE']  = [Min([oSni.min,  oSne.min]),  Max([oSni.max,  oSne.max])]
+	oSbni['AXIS_RANGE'] = [Min([oSbni.min, oSbne.min]), Max([oSbni.max, oSbne.max])]
+	
+	;Maxwellian Entropy Density
+	oSi = MrVar_Get(si_vnames[isc])
+	oSe = MrVar_Get(se_vnames[isc])
+	oSi['AXIS_RANGE']  = [Min([oSbi.min, oSbe.min]), Max([oSbi.max, oSbe.max])]
+	oSbi['AXIS_RANGE'] = [Min([oSbi.min, oSbe.min]), Max([oSbi.max, oSbe.max])]
+	
+	;Entropy Flux
 	oSfni = MrVar_Get(sfni_vnames[isc])
 	oSfne = MrVar_Get(sfne_vnames[isc])
 	oSfni['AXIS_RANGE'] = [Min([oSfni.min, oSfne.min]), Max([oSfni.max, oSfne.max])]
 	
-	;DIS Gradient
+	;Gradient
 	oGradSni['AXIS_RANGE'] = [Min([oGradSni.min, oGradSne.min]), Max([oGradSni.max, oGradSne.max])]
 	
-	;DIS Divergence
+	;Divergence
 	oDivSfni['AXIS_RANGE'] = [Min([oDivSfni.min, oDivSfne.min]), Max([oDivSfni.max, oDivSfne.max])]
 	
 ;-------------------------------------------
 ; Plot /////////////////////////////////////
 ;-------------------------------------------
-	win = MrVar_PlotTS( [b_vname, sni_vnames[isc], sbi_vname, gradsni_vname, sfni_vnames[isc], divsfni_vname, qe_vname, jdote_vname], $
+	win = MrVar_PlotTS( [b_vname, sni_vnames[isc], sbni_vname, gradsni_vname, sfni_vnames[isc], divsfni_vname, qe_vname, jdote_vname], $
 	                    /NO_REFRESH, $
 	                    YSIZE = 750 )
 	win = MrVar_OPlotTS( sni_vnames[isc], sne_vnames[isc] )
-	win = MrVar_OPlotTS( sbi_vname, sbe_vname )
+	win = MrVar_OPlotTS( sbni_vname, sbne_vname )
 	win = MrVar_OPlotTS( gradsni_vname, gradsne_vname )
 	win = MrVar_OPlotTS( sfni_vnames[isc], sfne_vnames[isc] )
 	win = MrVar_OPlotTS( divsfni_vname, divsfne_vname )
