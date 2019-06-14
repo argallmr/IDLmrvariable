@@ -96,6 +96,7 @@ CURRENT=current, $
 LAYOUT=layout, $
 NO_REFRESH=no_refresh, $
 XSIZE=xsize, $
+YERR=yerr, $
 YSIZE=ysize
 	compile_opt strictarr
 
@@ -196,7 +197,7 @@ YSIZE=ysize
 	; Plot /////////////////////////////////////
 	;-------------------------------------------
 		endif else if oVar -> HasAttr('DEPEND_0') then begin
-			gfx = MrVar_Plot(oVar, /CURRENT)
+			gfx = MrVar_Plot(oVar, YERR=yerr, /CURRENT)
 
 	;-------------------------------------------
 	; Non-Time-Series //////////////////////////
@@ -214,22 +215,23 @@ YSIZE=ysize
 		gfx -> SetProperty, TITLE       = title, $
 		                    XMINOR      = t_extra.xminor, $
 		                    XRANGE      = t_extra.xrange, $
-		                    XTICKFORMAT = (iRow lt nVars-1 ? '(a1)' : ''), $
+		                    XTICKFORMAT = (iRow lt layout[1] - 1 ? '(a1)' : ''), $
 		                    XTICKV      = t_extra.xtickv, $
-		                    XTICKNAME   = (iRow lt nVars-1 ? '' : t_extra.xtickname), $
+		                    XTICKNAME   = (iRow lt layout[1] - 1 ? '' : t_extra.xtickname), $
 		                    XTICKS      = t_extra.xticks, $
-		                    XTITLE      = (iRow lt nVars-1 ? '' : '!CTime (UT)')
+		                    XTITLE      = (iRow lt layout[1] - 1 ? '' : '!CTime (UT)')
 
 	;-------------------------------------------
 	; Create a Label ///////////////////////////
 	;-------------------------------------------
-		if iRow eq nVars-1 && iCol eq 0 then begin
+		if iRow eq layout[1] - 1 && iCol eq 0 then begin
 			xyo1 = MrText( 0.0, 0.0, t_label, $
 			               ALIGNMENT          = 1.0, $
+			               NAME               = 'Txt: Date Label', $
 			               /RELATIVE, $
 			               TARGET             = gfx, $
 			               VERTICAL_ALIGNMENT = 1.0 )
-			oxmargin[0] >= 12
+			oxmargin[0] >= 13
 		endif
 	endfor
 

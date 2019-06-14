@@ -66,7 +66,9 @@
 ;                           is scalar. - MRA
 ;-
 function MrVar_OPlotTS, gfx, vars, $
-WIN=win
+OVERPLOT=xCrushx, $
+WIN=win, $
+_REF_EXTRA=extra
 	compile_opt strictarr
 
 	;Catch errors
@@ -170,11 +172,11 @@ WIN=win
 		
 		;IMAGES
 		ENDIF ELSE IF oVar -> HasAttr('DEPEND_1') THEN BEGIN
-			tempGfx = MrVar_Image(oVar, OVERPLOT=oGfx)
+			tempGfx = MrVar_Image(oVar, OVERPLOT=oGfx, _EXTRA=extra)
 		
 		;SCATTER PLOTS
 		ENDIF ELSE IF oVar -> HasAttr('DEPEND_0') THEN BEGIN
-			tempGfx = MrVar_Plot(oVar, OVERPLOT=oGfx)
+			tempGfx = MrVar_Plot(oVar, OVERPLOT=oGfx, _EXTRA=extra)
 
 		;INVALID
 		ENDIF ELSE BEGIN

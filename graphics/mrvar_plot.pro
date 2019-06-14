@@ -63,12 +63,25 @@
 ;                       to be plotted. 
 ;
 ; :Keywords:
-;       BUFFER:     in, optional, type=boolean, default=0
-;                   If set, graphics will be sent to the Z-buffer.
-;       CURRENT:    in, optional, type=boolean, default=0
-;                   If set, the plot will be added to the current MrGraphics window.
-;       _REF_EXTRA: in, optional, type=any
-;                   Any keyword accepted by MrPlot::SetProperty
+;       BUFFER:         in, optional, type=boolean, default=0
+;                       If set, graphics will be sent to the Z-buffer.
+;       CURRENT:        in, optional, type=boolean, default=0
+;                       If set, the plot will be added to the current MrGraphics window.
+;       NO_LEGEND:      in, optional, type=boolean, default=0
+;                       If set, no legend is created. The default is to use the LABEL
+;                           attribute of `Y` to create or add to a legend.
+;       OVERPLOT:       in, optional, type=objref
+;                       A MrGraphics object that defines the dataspace and axes to be
+;                           used for the current plot.
+;       POSITION:       in, optional, type=FltArr(4)
+;                       The normalized coordinates [x0, y0, x1, y1] of the bottom left
+;                           (x0,y0) and top-right (x1,y1) corners of the plot.
+;       YERR:           in, optional, type=boolean, default=0
+;                       If set, error bars will be plotted. Requires `Y` to have the
+;                           following attributes: (DELTA_PLUS or DELTA_PLUS_VAR) or
+;                           (DELTA_MINUS or DELTA_MINUS_VAR).
+;       _REF_EXTRA:     in, optional, type=any
+;                       Any keyword accepted by MrPlot::SetProperty
 ;
 ; :Returns:
 ;       P:          out, required, type=object
@@ -89,12 +102,18 @@
 ;       2018/01/24  -   If X is time, then tick labels are formatted with t_ssm_labels.
 ;                           X-margins are made bigger if legend is created. - MRA
 ;       2018/01/31  -   Added the BUFFER keyword. - MRA
+;       2018/05/29  -   Added the NO_LEGEND and POSITION keywords. POSITION prevents
+;                           the graphic from being added to the layout first, then
+;                           being removed to create a hole. - MRA
 ;-
 function MrVar_Plot, x, y, $
 BUFFER=buffer, $
 CURRENT=current, $
 DIMENSION=dimension, $
+NO_LEGEND=no_legend, $
 OVERPLOT=overplot, $
+POSITION=position, $
+YERR=yerr, $
 _REF_EXTRA=extra
 	compile_opt strictarr
 
@@ -105,7 +124,10 @@ _REF_EXTRA=extra
 		MrPrintF, 'LogErr'
 		return, !Null
 	endif
-
+	
+	tf_legend = ~Keyword_Set(no_legend)
+	tf_yerr   = Keyword_Set(yerr)
+	
 ;-------------------------------------------
 ; Get MrVariable Objects ///////////////////
 ;-------------------------------------------
@@ -151,8 +173,9 @@ _REF_EXTRA=extra
 
 	;Use seconds since midnight, formatted as HH:MM:SS
 	if obj_isa(oX, 'MrTimeVar') then begin
+		IF Array_Equal(MrVar_GetTRange(), '') THEN trange = [oX['DATA',0], OX['DATA',-1]]
 		x_data        = oX -> GetData('SSM')
-		t_extra       = MrVar_TTicks(LABEL=t_label)
+		t_extra       = MrVar_TTicks(trange, LABEL=t_label)
 		xticks        = t_extra.xticks
 		xminor        = t_extra.xminor
 		xtickv        = t_extra.xtickv
@@ -168,16 +191,18 @@ _REF_EXTRA=extra
 ;-------------------------------------------
 	
 	;Plot the data
-	p1 = MrPlot( temporary(x_data), temporary(y_data), $
+	p1 = MrPlot( x_data, y_data, $
 	             /CURRENT, $
 	             DIMENSION   = oY -> GetAttrValue('DIMENSION',  /NULL), $
 	             NAME        = oY.name, $
 	             OVERPLOT    = overplot, $
+	             POSITION    = position, $
 	             COLOR       = oY -> GetAttrValue('COLOR',      /NULL), $
 	             FONT        = oY -> GetAttrValue('FONT',       /NULL), $
 	             LINESTYLE   = oY -> GetAttrValue('LINESTYLE',  /NULL), $
 	             MAX_VALUE   = oY -> GetAttrValue('MAX_VALUE',  /NULL), $
 	             MIN_VALUE   = oY -> GetAttrValue('MIN_VALUE',  /NULL), $
+	             NODATA      = oY -> GetAttrValue('NODATA',     /NULL), $
 	             NOCLIP      = oY -> GetAttrValue('NOCLIP',     /NULL), $
 	             NSUM        = oY -> GetAttrValue('NSUM',       /NULL), $
 	             POLAR       = oY -> GetAttrValue('POLAR',      /NULL), $
@@ -196,11 +221,11 @@ _REF_EXTRA=extra
 	p1 -> SetProperty, XTICKFORMAT=xtickformat, XMINOR=xminor, XRANGE=xrange, XTICKS=xticks, XTICKV=xtickv, XTITLE=xtitle
 ;	p1 -> SetProperty, XRANGE=xrange, XTITLE=xtitle, XTICKFORMAT=xtickformat
 	if n_elements(extra) gt 0 then p1 -> SetProperty, _STRICT_EXTRA=extra
-
+	
 ;-------------------------------------------
 ; Create a Legend //////////////////////////
 ;-------------------------------------------
-	if oY -> HasAttr('LABEL') then begin
+	if tf_legend && oY -> HasAttr('LABEL') then begin
 		;Do not draw the lines
 		if ~oY -> HasAttr('SAMPLE_WIDTH') then oY['SAMPLE_WIDTH'] = 0
 		
@@ -227,6 +252,44 @@ _REF_EXTRA=extra
 			                   TARGET     = overplot )
 		endelse
 	endif
+
+;-------------------------------------------
+; Display Error ////////////////////////////
+;-------------------------------------------
+	IF tf_yerr THEN BEGIN
+		;DELTA PLUS
+		CASE 1 OF
+			oY -> HasAttr('DELTA_PLUS_VAR'): dy_plus = (oY['DELTA_PLUS_VAR'])['DATA']
+			oY -> HasAttr('DELTA_PLUS'):     dy_plus = (oY['DELTA_PLUS'])['DATA']
+			ELSE: dy_plus = 0
+		ENDCASE
+		
+		;DELTA MINUS
+		CASE 1 OF
+			oY -> HasAttr('DELTA_MINUS_VAR'): dy_minus = (oY['DELTA_MINUS_VAR'])['DATA']
+			oY -> HasAttr('DELTA_MINUS'):     dy_minus = (oY['DELTA_MINUS'])['DATA']
+			ELSE: dy_minus = 0
+		ENDCASE
+		
+		;Add a polygon
+		polyx = [x_data, Reverse(x_data)]
+		polyy = [y_data + Temporary(dy_plus), Reverse(y_data - Temporary(dy_minus))]
+		err = MrPolygon( polyx, polyy, $
+		                 /DATA, $
+		                 /FILL_BACKGROUND, $
+		                 FILL_COLOR = 'Light Grey', $
+		                 COLOR      = 'Grey', $
+		                 NAME       = 'YERR: ' + oY.name, $
+		                 NOCLIP     = 0, $
+		                 TARGET     = p1 )
+		
+		;Put behind the graph
+		err -> Order, /SEND_BACKWARD
+		IF Obj_Valid(l1) THEN err -> Order, /SEND_BACKWARD
+	ENDIF
+	
+	x_data = !Null
+	y_data = !Null
 
 ;-------------------------------------------
 ; Finish ///////////////////////////////////

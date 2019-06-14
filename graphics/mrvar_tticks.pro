@@ -73,6 +73,9 @@
 ; :History:
 ;   Modification History::
 ;       2018-01-22  -   Created by Matthew Argall
+;       2018-09-22  -   Lower tick label was being duplicated when units were minutes.
+;                           Lower tick labels were being placed on last of common
+;                           labels instead of first. Fixed. - MRA
 ;-
 FUNCTION mrvar_tticks, trange, $
 LABEL=label, $
@@ -81,12 +84,13 @@ XTICKINTERVAL=xtickinterval
 	Compile_Opt idl2
 	On_Error, 2
 
-	COMMON MrVar_TTick_Common, ct0, ct1
+;	COMMON MrVar_TTick_Common, ct0, ct1
 	
 	;Initialize
 	IF N_Elements(trange) EQ 0 THEN BEGIN
 		trange     = MrVar_GetTRange()
 		trange_ssm = MrVar_GetTRange('SSM')
+		IF Array_Equal(trange, ['', '']) THEN Message, 'No time range defined.'
 	ENDIF ELSE BEGIN
 		oT = MrTimeVar(trange)
 		trange_ssm = oT['DATA', 'SSM']
@@ -216,14 +220,14 @@ XTICKINTERVAL=xtickinterval
 	;Do not duplicate lower label on adjacent tickmarks
 	IF setup[iTick[0]].fld2 NE 0 THEN BEGIN
 		CASE setup[iTick[0]].unit2 OF
-			1: u2 = Fix(year)   - Fix(Shift(year,   -1))
-			2: u2 = Fix(month)  - Fix(Shift(month,  -1))
-			3: u2 = Fix(day)    - Fix(Shift(day,    -1))
-			4: u2 = Fix(hour)   - Fix(Shift(hour,   -1))
-			5: u2 = Fix(minute) - Fix(Shift(minute, -1))
-			6: u2 = Fix(second) - Fix(Shift(second, -1))
-			7: u2 = Fix(second) - Fix(Shift(second, -1))
-			8: u2 = Fix(micro)  - Fix(Shift(micro,  -1))
+			1: u2 = Fix(year)   - Fix(Shift(year,   1))
+			2: u2 = Fix(month)  - Fix(Shift(month,  1))
+			3: u2 = Fix(day)    - Fix(Shift(day,    1))
+			4: u2 = Fix(hour)   - Fix(Shift(hour,   1))
+			5: u2 = Fix(minute) - Fix(Shift(minute, 1))
+			6: u2 = Fix(minute) - Fix(Shift(minute, 1))
+			7: u2 = Fix(second) - Fix(Shift(second, 1))
+			8: u2 = Fix(micro)  - Fix(Shift(micro,  1))
 			ELSE: Message, 'Unexpected unit for lower string label.'
 		ENDCASE
 		iZero = Where(u2 EQ 0, nZero)

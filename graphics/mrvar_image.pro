@@ -138,8 +138,9 @@ _REF_EXTRA=extra
 
 	;Use seconds since midnight, formatted as HH:MM:SS
 	if obj_isa(oX, 'MrTimeVar') then begin
+		IF Array_Equal(MrVar_GetTRange(), '') THEN trange = [oX['DATA',0], OX['DATA',-1]]
 		x_data        = oX -> GetData('SSM')
-		t_extra       = MrVar_TTicks(LABEL=t_label)
+		t_extra       = MrVar_TTicks(trange, LABEL=t_label)
 		xticks        = t_extra.xticks
 		xminor        = t_extra.xminor
 		xtickv        = t_extra.xtickv
