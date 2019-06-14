@@ -1,10 +1,10 @@
 ; docformat = 'rst'
 ;
 ; NAME:
-;       MrVar_SetTRange
+;       MrVar_xForm
 ;
 ;*****************************************************************************************
-;   Copyright (c) 2016, Matthew Argall                                                   ;
+;   Copyright (c) 2018, Matthew Argall                                                   ;
 ;   All rights reserved.                                                                 ;
 ;                                                                                        ;
 ;   Redistribution and use in source and binary forms, with or without modification,     ;
@@ -33,66 +33,74 @@
 ;
 ; PURPOSE:
 ;+
-;   Set the global time range for reading and displaying data with MrVariables
+;   Store a 3x3 time-independent transformation matrix.
+;
+;   Calling Sequence
+;       oT = MrVar_xForm_Set(T)
+;
+; :Categories:
+;   Coordinate Systems
 ;
 ; :Params:
-;       TRANGE:             in, required, type=2x1 strarr
-;                           Array of values to be stored, or a MrVariable object whose
-;                               array is to be copied.
-;       TYPE:               in, optional, type=array, default='ISO-8601'
-;                           Units of the time array. Accepted values are::
-;                               'CDF_EPOCH'       - CDF Epoch values (milliseconds)
-;                               'CDF_EPOCH16'     - CDF Epoch16 values (picoseconds)
-;                               'CDF_EPOCH_LONG'  - CDF Epoch16 values (picoseconds)
-;                               'CDF_TIME_TT2000' - CDF TT2000 values (nanoseconds)
-;                               'TT2000'          - CDF TT2000 values (nanoseconds)
-;                               'JULIAN'          - Julian date (days)
-;                               'UNIX'            - Unix time (seconds)
-;                               'ISO-8601'        - ISO-8601 formatted string
-;                               'CUSTOM'          - Custom time string format
-;       T_REF:              in, optional, type=string
-;                           The reference time for any relative time range.
+;       VAR:            in, required, type=string/integer/object
+;                       The name, number, or objref of the MrVariable object to be rotated.
 ;
 ; :Keywords:
-;       RESET:              in, optional, type=boolean, default=0
-;                           If set, the global time range will be reset to the Null state.
+;       CACHE:          in, optional, type=boolean, default=0
+;                       If set, the results will be added to the variable cache.
+;       NAME:           in, optional, type=string, default='xForm(' + var.name + ')'
+;                       Name to be given to the result.
+;
+; :Returns:
+;       OOUT:           out, required, type=objref
+;                       The results of rotating `VAR`. The object class is the same as
+;                           that of `VAR`.
 ;
 ; :Author:
-;   Matthew Argall::
+;       Matthew Argall::
 ;       University of New Hampshire
 ;       Morse Hall, Room 348
 ;       8 College Rd.
 ;       Durham, NH, 03824
 ;       matthew.argall@unh.edu
 ;
-; :Copyright:
-;       Matthew Argall 2016
-;
 ; :History:
 ;   Modification History::
-;       2016-05-27  -   Written by Matthew Argall
-;       2017-07-27  -   Added the RESET keyword.
-;       2019-02-05  -   Added the T_REF parameter. - MRA
+;       2018/08/03  -   Written by Matthew Argall
 ;-
-pro MrVar_SetTRange, trange, type, t_ref, $
-RESET=reset
-	compile_opt idl2
-	on_error, 2
-
-	;Ensure everthing has MrVar has been initialized
-	@mrvar_common
-
-	;Create a time object to manage global time range
-	if ~obj_valid(MrVarTRange) then MrVarTRange = MrTimeVar()
+FUNCTION MrVar_xForm, var, $
+NAME=name, $
+CACHE=cache
+	Compile_Opt idl2
+	On_Error, 2
 	
-	;Reset time range?
-	if keyword_set(reset) || array_equal(trange, '') then begin
-		MrVarTRange[0:1] = ''
+	Common MrVar_xForm_Comm, xT
 	
-	;Set new time range
-	endif else begin
-		;Must include start and end times
-		if n_elements(trange) ne 2 then message, 'TRANGE must have 2 elements.'
-		MrVarTRange -> SetData, trange, type, T_REF=t_ref
-	endelse
-end
+	IF N_Elements(xT) EQ 0 THEN $
+		Message, 'Tranformation matrix must be set with MrVar_xForm_Set.'
+	
+	;Check inputs
+	oVar = MrVar_Get(var)
+	IF N_Elements(name) EQ 0 THEN name = 'xForm(' + oVar.name + ')'
+	
+	;Create a matrix object
+	nPts = oVar -> GetNPts()
+	oT   = MrMatrixTS( oVar['TIMEVAR'], Rebin(xT, nPts, 3, 3) )
+	
+	;Transform data
+	IF Obj_Class(oVar) EQ 'MRVECTORTS' THEN BEGIN
+		oOut = oT -> Rotate_Vector(oVar)
+	ENDIF ELSE IF Obj_Class(oVar) EQ 'MRMATRIXTS' THEN BEGIN
+		oOut = oT -> Rotate_Matrix(oVAr)
+	ENDIF ELSE BEGIN
+		Message, 'Cannot rotate object of class ' + Obj_Class(oVar) + '.'
+	ENDELSE
+	Obj_Destroy, oT
+	
+	;Name and cache
+	oOut -> SetName, name
+	IF Keyword_Set(cache) THEN oOut -> Cache
+	
+	
+	RETURN, oOut
+END

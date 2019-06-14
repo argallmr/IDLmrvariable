@@ -1421,9 +1421,10 @@ NAME=name
 ;-----------------------------------------------------
 	if isa(vec, 'MrVectorTS') then begin
 		;MrVectorTS
-		outVec = [ [(*self.data)[*,0,0]*vec['DATA',*,0] + (*self.data)[*,1,0]*vec['DATA',*,1] + (*self.data)[*,2,0]*vec['DATA',*,2]], $
-		           [(*self.data)[*,0,1]*vec['DATA',*,0] + (*self.data)[*,1,1]*vec['DATA',*,1] + (*self.data)[*,2,1]*vec['DATA',*,2]], $
-		           [(*self.data)[*,0,2]*vec['DATA',*,0] + (*self.data)[*,1,2]*vec['DATA',*,1] + (*self.data)[*,2,2]*vec['DATA',*,2]] ]
+		pVec = vec['PTR']
+		outVec = [ [(*self.data)[*,0,0]*(*pvec)[*,0] + (*self.data)[*,1,0]*(*pvec)[*,1] + (*self.data)[*,2,0]*(*pvec)[*,2]], $
+		           [(*self.data)[*,0,1]*(*pvec)[*,0] + (*self.data)[*,1,1]*(*pvec)[*,1] + (*self.data)[*,2,1]*(*pvec)[*,2]], $
+		           [(*self.data)[*,0,2]*(*pvec)[*,0] + (*self.data)[*,1,2]*(*pvec)[*,1] + (*self.data)[*,2,2]*(*pvec)[*,2]] ]
 
 ;-----------------------------------------------------
 ; Normal Array \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\

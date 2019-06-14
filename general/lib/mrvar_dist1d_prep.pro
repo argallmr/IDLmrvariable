@@ -94,6 +94,8 @@
 ;   Modification History::
 ;       2017/02/12  -   Written by Matthew Argall
 ;       2017/05/10  -   Added the CIRCLE keyword. - MRA
+;       2018/05/24  -   Removed the IDX parameter to maintain time dependence of the
+;                           distribution function. - MRA
 ;-
 ;*****************************************************************************************
 ;+
@@ -170,23 +172,23 @@ CACHE=cache
 ;-------------------------------------------
 ; Find Nearest Energy Bin //////////////////
 ;-------------------------------------------
-	oE  = oDist['DEPEND_0']
+	oE  = oDist['DEPEND_1']
 	idx = MrNearestNeighbor(oE['DATA'], energy)
 
 ;-------------------------------------------
 ; Create Variable //////////////////////////
 ;-------------------------------------------
 	;Reverse the order of the minus so the velcity maxima are at the edges
-	oX = MrVariable( Reform(oDist['DATA',idx,*]), $
-	                 CACHE     = cache, $
-	                 NAME      = oDist.name + '_EPhi' )
+	oX = MrTimeSeries( oDist['TIMEVAR'], Reform(oDist['DATA',*,idx,*]), $
+	                   CACHE     = cache, $
+	                   NAME      = oDist.name + '_EPhi' )
 	
 ;-------------------------------------------
 ; Set Attributes ///////////////////////////
 ;-------------------------------------------
 	;PHI
 	;   - Do not know if it is polar or azimuth angle
-	oPhi = oDist['DEPEND_1']
+	oPhi = oDist['DEPEND_2']
 	phi_units = oPhi -> HasAttr('UNITS') ? oPhi['UNITS'] : ''
 	IF ~StRegEx(phi_units, 'deg', /BOOLEAN, /FOLD_CASE) THEN BEGIN
 		oPhi -> SetData, oPhi['DATA'] * !radeg
@@ -195,7 +197,7 @@ CACHE=cache
 	ENDIF
 	
 	;DISTRIBUTION
-	oX['DEPEND_0']   = oPhi
+	oX['DEPEND_1']   = oPhi
 	oX['DIMENSION']  = 2B
 	oX['LOG']        = 1B
 	oX['PLOT_TITLE'] = 'f($\phi$)'
@@ -209,7 +211,7 @@ CACHE=cache
 	
 	;Distribution range
 	iGT0 = oX -> Where(0, /GREATER, COUNT=nGT0)
-	IF nGT0 GT 0 THEN oX['AXIS_RANGE'] = [Min( oX['DATA',iGT0], MAX=dmax ), dmax]
+	IF nGT0 GT 0 THEN oX['AXIS_RANGE'] = [Min( oX['DATA',*,iGT0], MAX=dmax ), dmax]
 	
 	;Other attributes
 	IF oDist -> HasAttr('UNITS')         THEN oDist -> CopyAttrTo, oX, 'UNITS'
@@ -235,7 +237,7 @@ CACHE=cache
 ;-------------------------------------------
 	
 	;Move from (-!pi, pi] to [0, 2*!pi)
-	oPhi = oDist['DEPEND_1']
+	oPhi = oDist['DEPEND_2']
 	iNeg = oPhi -> Where(0, /LESS, COUNT=nNeg)
 	IF nNeg GT 0 THEN oPhi[iNeg] = 2*!pi + oPhi[iNeg]
 
@@ -263,20 +265,24 @@ CACHE=cache
 	;
 
 	;Average the two channels together
-	xp = Mean( oDist[ 'DATA', *, [  i0p,   i0m] ], DIMENSION=2 )
-	xm = Mean( oDist[ 'DATA', *, [i180p, i180m] ], DIMENSION=2 )
-	yp = Mean( oDist[ 'DATA', *, [ i90p,  i90m] ], DIMENSION=2 )
-	ym = Mean( oDist[ 'DATA', *, [i270p, i270m] ], DIMENSION=2 )
+	xp = Mean( oDist[ 'DATA', *, *, [  i0p,   i0m] ], DIMENSION=3 )
+	xm = Mean( oDist[ 'DATA', *, *, [i180p, i180m] ], DIMENSION=3 )
+	yp = Mean( oDist[ 'DATA', *, *, [ i90p,  i90m] ], DIMENSION=3 )
+	ym = Mean( oDist[ 'DATA', *, *, [i270p, i270m] ], DIMENSION=3 )
 
 ;-------------------------------------------
 ; Create Variables /////////////////////////
 ;-------------------------------------------
+	dims = Size(oDist, /DIMENSIONS)
+	nTime = dims[0]
+	nVel  = dims[1]
+	nPhi  = dims[2]
 	
 	;Reverse the order of the minus so the velcity maxima are at the edges
-	oX = MrVariable( [ [Reverse(xm), !Values.F_NaN, xp], $
-	                   [Reverse(ym), !Values.F_NaN, yp] ], $
-	                 CACHE     = cache, $
-	                 NAME      = oDist.name + '_xy' )
+	oX = MrTimeSeries( oDist['TIMEVAR'], [ [ [Reverse(xm)], [Rebin(!Values.F_NaN, nTime)], [xp] ], $
+	                                       [ [Reverse(ym)], [Rebin(!Values.F_NaN, nTime)], [yp] ] ], $
+	                   CACHE     = cache, $
+	                   NAME      = oDist.name + '_xy' )
 
 ;-------------------------------------------
 ; Set Attributes ///////////////////////////
@@ -284,15 +290,15 @@ CACHE=cache
 	
 	;Vx
 	;   - Set mirror velocities to -X
-	oV_temp             = oDist['DEPEND_0']
-	oV                  = MrVariable( [-Reverse(oV_temp['DATA']), 0, oV_temp['DATA']] )
+	oV_temp             = oDist['DEPEND_1']
+	oV                  = MrTimeSeries( oDist['TIMEVAR'], [-Reverse(oV_temp['DATA']), 0, oV_temp['DATA']] )
 	oV['TITLE']         = 'Velocity (km/s)'
 	oV['UNITS']         = 'km/s'
 	oV['SI_CONVERSION'] = '1e3>m/s'
 	
 	;Distribution
 	oX['COLOR']     = ['Blue', 'Red']
-	oX['DEPEND_0']  = oV
+	oX['DEPEND_1']  = oV
 	oX['DIMENSION'] = 1B
 	oX['LABEL']     = ['X', 'Y']
 	oX['LOG']       = 1B
@@ -325,7 +331,7 @@ CACHE=cache
 ;-------------------------------------------
 	
 	;Move from (-!pi/2, pi/2] to [0, !pi)
-	oPhi = oDist['DEPEND_1']
+	oPhi = oDist['DEPEND_2']
 	iNeg = oPhi -> Where(0, /LESS, COUNT=nNeg)
 	IF nNeg GT 0 THEN oPhi[iNeg] = !pi + oPhi[iNeg]
 
@@ -344,16 +350,16 @@ CACHE=cache
 	;
 
 	;Average the two perpendicular channels together
-	x0   = oDist[ 'DATA', *, i0 ]
-	x180 = oDist[ 'DATA', *, i180 ]
-	x90  = Mean( oDist[ 'DATA', *, [i90m, i90p] ], DIMENSION=2 )
+	x0   = oDist[ 'DATA', *, *, i0 ]
+	x180 = oDist[ 'DATA', *, *, i180 ]
+	x90  = Mean( oDist[ 'DATA', *, *, [i90m, i90p] ], DIMENSION=3 )
 
 ;-------------------------------------------
 ; Create Variables /////////////////////////
 ;-------------------------------------------
 	
 	;Reverse the order of the minus so the velcity maxima are at the edges
-	oX = MrVariable( [ [x0], [x90], [x180] ], $
+	oX = MrVariable( oDist['TIMEVAR'], [ [[x0]], [[x90]], [[x180]] ], $
 	                 CACHE     = cache, $
 	                 NAME      = oDist.name + '_polarcuts' )
 
@@ -361,14 +367,14 @@ CACHE=cache
 ; Set Attributes ///////////////////////////
 ;-------------------------------------------
 	;Energy
-	oE = oDist['DEPEND_0']
+	oE = oDist['DEPEND_1']
 	oE['TITLE'] = 'E' + (oE -> HasAttr('UNITS') ? ' (' + oE['UNITS'] + ')' : '')
 	
 	;DEPEND_0
 	oX['COLOR']     = ['Black', 'Red', 'Blue']
 	oX['DIMENSION'] = 1B
 	oX['LABEL']     = ['0', '90', '180']
-	oX['DEPEND_0']  = oDist['DEPEND_0']
+	oX['DEPEND_1']  = oDist['DEPEND_1']
 	oX['LOG']       = 1B
 	
 	;AXIS_RANGE
@@ -426,7 +432,7 @@ END
 ;       oX:         out, required, type=objref
 ;                   A MrVariable containing the 1D cut(s) of the distribution.
 ;-
-FUNCTION MrVar_Dist1D_Prep, distfn, energy, mass, idx, $
+FUNCTION MrVar_Dist1D_Prep, distfn, energy, mass, $
 CACHE=cache, $
 CIRCULAR=circular, $
 NAME=name, $
@@ -457,17 +463,15 @@ POLAR=polar
 ;-------------------------------------------
 ; Order of Inputs //////////////////////////
 ;-------------------------------------------
-	; oX = MrVar_Dist1D_Prep( theDist, energy, mass[, idx], /CIRCLE )
+	; oX = MrVar_Dist1D_Prep( theDist, energy, mass, /CIRCLE )
 	IF tf_circle THEN BEGIN
 		theEnergy = energy
 		theMass   = mass
-		IF N_Elements(idx) GT 0 THEN theIdx = idx
 	
-	; oX = MrVar_Dist1D_Prep( theDist, mass[, idx]  [, /POLAR] )
+	; oX = MrVar_Dist1D_Prep( theDist, mass  [, /POLAR] )
 	ENDIF ELSE BEGIN
 		theMass = energy
 		IF N_Elements(mass) GT 0 THEN theIdx = mass
-		IF Arg_Present(idx) THEN Message, 'Incorrect number of parameters.'
 	ENDELSE
 
 ;-------------------------------------------
@@ -478,10 +482,10 @@ POLAR=polar
 	;   - Pick a single distribution
 	;   - Energy  --> Velocity
 	;   - Degrees --> Radians
-	oDist2D = MrVar_Dist2D_Prep(distfn, theMass, theIdx, ENERGY=(tf_polar || tf_circle))
+	oDist2D = MrVar_Dist2D_Prep(distfn, theMass, ENERGY=(tf_polar || tf_circle))
 
 	;Center angular bins
-	MrVar_Dist1D_Prep_CenterBins, oDist2D['DEPEND_1']
+	MrVar_Dist1D_Prep_CenterBins, oDist2D['DEPEND_2']
 	
 	;Extract data
 	IF tf_circle THEN BEGIN

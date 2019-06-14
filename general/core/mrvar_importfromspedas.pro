@@ -48,6 +48,8 @@
 ;                       The name of a tplot save file from which data is loaded.
 ;
 ; :Keywords:
+;       VARNAMES:       out, optional, string/strarr
+;                       Names of the variables imported from SPEDAS.
 ;       VERBOSE:        in, optional, type=boolean, default=false
 ;                       If set, helpful text will be printed to the console.
 ;
@@ -62,9 +64,12 @@
 ; :History:
 ;   Modification History::
 ;       2018-03-06  -   Written by Matthew Argall
+;       2019-02-08  -   Added the VARNAMES keyword. Anticipate the type of time
+;                           series object to create (e.g. scalar, vector, matrix). - MRA
 ;-
 ;*****************************************************************************************
 PRO MrVar_ImportFromSPEDAS, variables, filename, $
+VARNAMES=out_names, $
 VERBOSE=verbose
 	Compile_Opt idl2
 	
@@ -77,6 +82,7 @@ VERBOSE=verbose
 	
 	;Find the variables to import
 	vnames = tnames(variables, nvars)
+	out_names = StrArr(nvars)
 
 ;-------------------------------------------
 ; Import Variables /////////////////////////
@@ -92,10 +98,24 @@ VERBOSE=verbose
 		;Create the time variable
 		oDep0 = MrTimeVar( Time_String(d.x, /AUTOPREC), '%Y-%M-%d/%H:%m:%S%f' )
 		
+		;Guess the type of time series object
+		dims = Size(d.y, /DIMENSIONS)
+		ndims = N_Elements(dims)
+		IF ndims EQ 1 THEN BEGIN
+			class = 'MrScalarTS'
+		ENDIF ELSE IF ndims EQ 2 && dims[1] EQ 3 THEN BEGIN
+			class = 'MrVectorTS'
+		ENDIF ELSE IF ndims EQ 3 && Array_Equal(dims[1:2], [3,3]) THEN BEGIN
+			class = 'MrMatrixTS'
+		ENDIF ELSE BEGIN
+			class = 'MrTimeSeries'
+		ENDELSE
+		
 		;Create the MrTimeSeries variable
-		oVar = MrTimeSeries( oDep0, d.y, $
-		                     /CACHE, $
-		                     NAME = vnames[i] )
+		oVar = Obj_New( class, oDep0, d.y, $
+		                /CACHE, $
+		                NAME = vnames[i] )
+		out_names[i] = oVar.name
 		
 		;Add dependency
 		tf_dep1 = MrStruct_HasTag(d, 'V')

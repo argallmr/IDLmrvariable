@@ -1,10 +1,10 @@
 ; docformat = 'rst'
 ;
 ; NAME:
-;       MrVar_SetTRange
+;       MrVar_xForm_Set
 ;
 ;*****************************************************************************************
-;   Copyright (c) 2016, Matthew Argall                                                   ;
+;   Copyright (c) 2018, Matthew Argall                                                   ;
 ;   All rights reserved.                                                                 ;
 ;                                                                                        ;
 ;   Redistribution and use in source and binary forms, with or without modification,     ;
@@ -33,66 +33,52 @@
 ;
 ; PURPOSE:
 ;+
-;   Set the global time range for reading and displaying data with MrVariables
+;   Store a 3x3 time-independent transformation matrix.
+;
+;   Calling Sequence
+;       oT = MrVar_xForm_Set(T)
+;
+; :Categories:
+;   Coordinate Systems
 ;
 ; :Params:
-;       TRANGE:             in, required, type=2x1 strarr
-;                           Array of values to be stored, or a MrVariable object whose
-;                               array is to be copied.
-;       TYPE:               in, optional, type=array, default='ISO-8601'
-;                           Units of the time array. Accepted values are::
-;                               'CDF_EPOCH'       - CDF Epoch values (milliseconds)
-;                               'CDF_EPOCH16'     - CDF Epoch16 values (picoseconds)
-;                               'CDF_EPOCH_LONG'  - CDF Epoch16 values (picoseconds)
-;                               'CDF_TIME_TT2000' - CDF TT2000 values (nanoseconds)
-;                               'TT2000'          - CDF TT2000 values (nanoseconds)
-;                               'JULIAN'          - Julian date (days)
-;                               'UNIX'            - Unix time (seconds)
-;                               'ISO-8601'        - ISO-8601 formatted string
-;                               'CUSTOM'          - Custom time string format
-;       T_REF:              in, optional, type=string
-;                           The reference time for any relative time range.
-;
-; :Keywords:
-;       RESET:              in, optional, type=boolean, default=0
-;                           If set, the global time range will be reset to the Null state.
+;       T:              in, required, type=string/integer/object
+;                       Transformation matrix from one system to another.
 ;
 ; :Author:
-;   Matthew Argall::
+;       Matthew Argall::
 ;       University of New Hampshire
 ;       Morse Hall, Room 348
 ;       8 College Rd.
 ;       Durham, NH, 03824
 ;       matthew.argall@unh.edu
 ;
-; :Copyright:
-;       Matthew Argall 2016
-;
 ; :History:
 ;   Modification History::
-;       2016-05-27  -   Written by Matthew Argall
-;       2017-07-27  -   Added the RESET keyword.
-;       2019-02-05  -   Added the T_REF parameter. - MRA
+;       2018/08/03  -   Written by Matthew Argall
 ;-
-pro MrVar_SetTRange, trange, type, t_ref, $
-RESET=reset
-	compile_opt idl2
-	on_error, 2
-
-	;Ensure everthing has MrVar has been initialized
-	@mrvar_common
-
-	;Create a time object to manage global time range
-	if ~obj_valid(MrVarTRange) then MrVarTRange = MrTimeVar()
+PRO MrVar_xForm_Set, T
+	Compile_Opt idl2
+	On_Error, 2
 	
-	;Reset time range?
-	if keyword_set(reset) || array_equal(trange, '') then begin
-		MrVarTRange[0:1] = ''
+	Common MrVar_xForm_Comm, xT
 	
-	;Set new time range
-	endif else begin
-		;Must include start and end times
-		if n_elements(trange) ne 2 then message, 'TRANGE must have 2 elements.'
-		MrVarTRange -> SetData, trange, type, T_REF=t_ref
-	endelse
-end
+	;Check dimensions
+	dims  = Size(T, /DIMENSIONS)
+	nDims = N_Elements(dims)
+	IF nDims NE 2 || ~Array_Equal(dims, 3) $
+		THEN Message, 'T must be a 3x3 transformation matrix.'
+	
+	;A regular transformation matrix
+	IF MrIsA(T, 'OBJREF') THEN BEGIN
+		oT = MrVar_Get(T)
+		IF Obj_Class(oT) NE 'MRVARIABLE' $
+			THEN Message, 'T must be a MrVariable object.'
+		xT = oT['DATA']
+	ENDIF ELSE BEGIN
+		xT = T
+	ENDELSE
+	
+	;Put a time dimension first
+	xT = Reform(xT, 1, 3, 3)
+END

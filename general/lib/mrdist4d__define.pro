@@ -60,7 +60,8 @@
 ;
 ; :History:
 ;   Modification History::
-;       2016/10/24  -   Written by Matthew Argall
+;       2018/02/12  -   Written by Matthew Argall
+;       2018/10/24  -   Take care when velocity bins are below spacecraft potential. - MRA
 ;-
 ;*****************************************************************************************
 ;+
@@ -181,6 +182,12 @@ _REF_EXTRA=extra
 END
 
 
+PRO MrDist4D::Add, oDist
+	Compile_Opt idl2
+	On_Error, 2
+
+END
+
 ;+
 ;   Clean up after the object is destroyed
 ;-
@@ -196,7 +203,7 @@ END
 
 ;+
 ;   Convert the distribution function from one set of units to another. The conversion
-;   factors are:
+;   factors are (start with column):
 ;                                        PARTICLE
 ;           |  PARTICLE FLUX (F)  |  ENERGY FLUX (FE)  |  PHASE SPACE DENSITY (f)  |
 ;      -----------------------------------------------------------------------------
@@ -240,11 +247,11 @@ PRO MrDist4D::ConvertUnits, to_units
 	; Conversion factor from particle energy flux to phase space density
 	;   - (m^2 / 2 * E^2 ) * FE = [ kg^2 / (2 * eV^2) ]                         * (eV / cm^2 / s / sr / eV)
 	;                           = ( kg^2 / eV^2 )                               / ( cm^2 * s * sr ) * 0.5
-	;                           = [ kg^2 / ( eV * (1.602e-19 J/eV) ) ]          / ( cm^2 * s * sr ) * 0.5
+	;                           = [ kg^2 / ( eV * (1.602e-19 J/eV) )^2 ]        / ( cm^2 * s * sr ) * 0.5
 	;                           = [ kg^2 / ( kg m^2 / s^2 )^2 ]                 / ( cm^2 * s * sr ) * 0.5 * 1.602e-19^(-2)
 	;                           = [ (N * 1.672e-27 kg)^2 / ( kg^2 m^4 / s^4 ) ] / ( cm^2 * s * sr ) * 0.5 * 1.602e-19^(-2)
 	;                           = [ kg^2 / ( kg^2 m^4 / s^4 ) ]                 / ( cm^2 * s * sr ) * 0.5 * 1.602e-19^(-2) * N^2 * 1.672e-27^2
-	;                           = [ 1 / (m^4 * 1e8 /cm^4/m^4 / s^4) ]           / ( cm^2 * s * sr ) * 0.5 * 1.602e-19^(-2) * N^2 * 1.672e-27^2
+	;                           = [ 1 / (m^4 * 1e8 * cm^4/m^4 / s^4) ]          / ( cm^2 * s * sr ) * 0.5 * 1.602e-19^(-2) * N^2 * 1.672e-27^2
 	;                           = [ 1 / (cm^4 / s^4) ]                          / ( cm^2 * s * sr ) * 0.5 * 1.602e-19^(-2) * N^2 * 1.672e-27^2 * 1e-8
 	;                           = ( s^4 / cm^4 )                                / ( cm^2 * s * sr ) * 0.5 * 1.602e-19^(-2) * N^2 * 1.672e-27^2 * 1e-8
 	;                           = s^3 / cm^6 * N^2 * 1.602e-19^(-2) 1.672e-27^2 * 1e-8
@@ -388,6 +395,7 @@ END
 ;-
 FUNCTION MrDist4D::Density, $
 CACHE=cache, $
+GROUND=ground, $
 NAME=name
 	Compile_Opt idl2
 	
@@ -399,7 +407,8 @@ NAME=name
 	ENDIF
 	
 	;Defaults
-	tf_cache = Keyword_Set(cache)
+	tf_cache  = Keyword_Set(cache)
+	tf_ground = Keyword_Set(ground)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Density'
 	
 	;Must integrate over phase space
@@ -410,6 +419,7 @@ NAME=name
 	q       = MrConstants('q')
 	eV2J    = MrConstants('eV2J')
 	dims    = Size(self.oDist, /DIMENSIONS)
+	tf_nan  = 0B
 	
 ;-----------------------------------------------------
 ; Integrate over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -417,7 +427,7 @@ NAME=name
 	;Extract phi and the bin sizes
 	oPhi = self.oDist['DEPEND_1']
 	dPhi = (oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR'])['DATA'] * deg2rad
-
+	
 	;Integrate
 	ftemp = Total( self.oDist['DATA'] * Rebin(dPhi, dims), 2 )
 	
@@ -461,10 +471,35 @@ NAME=name
 	
 	;SPACECRAFT POTENTIAL
 	IF N_Elements(self.oVsc) GT 0 THEN BEGIN
-		;Sign is charge dependent. E = q * V = 1/2 * m * v^2
-		signQ = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
-		vsc   = Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass )
-		VM    = v^2 * (1 + signQ * (vsc^2 / v^2))
+		IF tf_ground THEN BEGIN
+			vsc = Rebin( Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass ), dims[[0,3]] )
+			v  -= vsc
+			
+			iBad = Where(v LT 0, nBad)
+			IF nBad GT 0 THEN BEGIN
+				tf_nan  = 1B
+				v[iBad] = 0;!Values.D_NaN
+			ENDIF
+				
+			VM  = v^2
+		
+		ENDIF ELSE BEGIN
+			;Sign is charge dependent. E = q * V = 1/2 * m * v^2
+			;   - For the case of electrons in a positive spacecraft potential, a further
+			;     straightforward effect of the potential is to require, in the discrete
+			;     summation, the exclusion of velocity steps, where v < vsc
+			signQ = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
+			vsc   = Rebin( Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass ), dims[[0,3]] )
+			VM    = v^2 * (1 + signQ * (vsc^2 / v^2))
+		
+			;Exclude bins that are below the spacecraft potential
+			;   - Total() will not include NaNs
+			iBad  = Where(VM LT 0, nBad)
+			IF nBad GT 0 THEN BEGIN
+				tf_nan   = 1B
+				VM[iBad] = !Values.D_NaN
+			ENDIF
+		ENDELSE
 	ENDIF ELSE BEGIN
 		VM = v^2
 	ENDELSE
@@ -472,7 +507,7 @@ NAME=name
 	;Integrate velocity
 	;   - V is in m/s while f is in s^3/cm^6
 	;   - v^2 * dv --> (m/s)^3  --> (cm/s)^3 * 1e6
-	N = Total( Temporary(ftemp) * Temporary(v) * Sqrt(VM) * Temporary(dv), 2 ) * 1e6
+	N = Total( Temporary(ftemp) * Temporary(v) * Sqrt(VM) * Temporary(dv), 2, NAN=tf_nan ) * 1e6
 
 ;-----------------------------------------------------
 ; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -537,12 +572,7 @@ NAME=name
 	tf_vsc  = N_Elements(self.oVsc) GT 0
 	
 	;Check for zeros -- mess with ALog
-	tf_nan = 0B
 	iZero  = self.oDist -> Where(0, /EQUAL, COUNT=nZero)
-	IF nZero GT 0 THEN BEGIN
-		self.oDist[iZero] = !Values.F_NaN
-		tf_nan = 1B
-	ENDIF
 
 ;-----------------------------------------------------
 ; Integration Over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -554,7 +584,9 @@ NAME=name
 	dPhi = Rebin((oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR'])['DATA'] * deg2rad, dims)
 	
 	;Integrate
-	ftemp = Total( self.oDist['DATA'] * ALog(self.oDist['DATA']) * Temporary(dPhi), 2, NAN=tf_nan)
+	ftemp = self.oDist['DATA']
+	IF nZero GT 0 THEN ftemp[iZero] = 1.0
+	ftemp = Total( self.oDist['DATA'] * ALog(Temporary(ftemp)) * Temporary(dPhi), 2)
 	
 	;Put zeros back
 	IF nZero GT 0 THEN self.oDist[iZero] = 0.0
@@ -568,7 +600,7 @@ NAME=name
 	dTheta = Rebin((oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR'])['DATA'] * deg2rad, dims[[0,2,3]])
 	
 	;Integrate Theta
-	ftemp  = Total( Temporary(ftemp) * Sin(Temporary(theta)) * Temporary(dTheta), 2, NAN=tf_nan)
+	ftemp  = Total( Temporary(ftemp) * Sin(Temporary(theta)) * Temporary(dTheta), 2)
 
 ;-----------------------------------------------------
 ; Integration Over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -594,7 +626,16 @@ NAME=name
 	;SPACECRAFT POTENTIAL
 	IF tf_vsc THEN BEGIN
 		sgn  = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
-		vsc  = Sqrt( 2.0 * q / self.mass * (self.oVsc['DATA']) )
+		vsc  = Rebin( Sqrt( 2.0 * q / self.mass * (self.oVsc['DATA']) ), dims[[0,3]] )
+		VM    = v^2 * (1 + sgn * (vsc^2 / v^2))
+		
+		;Exclude bins that are below the spacecraft potential
+		;   - Total() will not include NaNs
+		iBad  = Where(VM LT 0, nBad)
+		IF nBad GT 0 THEN BEGIN
+			tf_nan   = 1B
+			VM[iBad] = !Values.D_NaN
+		ENDIF
 	ENDIF
 	
 	;Integrate velocity
@@ -602,7 +643,7 @@ NAME=name
 	;   - V is in m/s while f is in s^3/cm^6
 	;   - f --> s^3/cm^6  --> s^3/m^6 * 1e12
 	IF tf_Vsc $
-		THEN H = Total( ftemp * v * Sqrt(v^2 + sgn*vsc^2) * dv, 2, NAN=tf_nan ) * 1e12 $
+		THEN H = Total( ftemp * v * Sqrt(VM) * dv, 2, NAN=tf_nan ) * 1e12 $
 		ELSE H = Total( ftemp * v^2 * dv, 2, NAN=tf_nan ) * 1e12
 	
 	ftemp = !Null
@@ -741,7 +782,6 @@ FUNCTION MrDist4D::ESpec, $
 CACHE=cache, $
 PHI_RANGE=phi_range, $
 NAME=name, $
-NE_BINS=nE_bins, $
 THETA_RANGE=theta_range
 	Compile_Opt idl2
 	
@@ -749,15 +789,15 @@ THETA_RANGE=theta_range
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
-		IF N_Elements(oDist3D) GT 0 THEN Obj_Destroy, oDist3D
 		IF N_Elements(oESpec)  GT 0 THEN Obj_Destroy, oESpec
-		IF N_Elements(oEBins)  GT 0 THEN Obj_Destroy, oEBins
 		RETURN, !Null
 	ENDIF
 	
 	;Defaults
 	tf_cache = Keyword_Set(cache)
-	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_ESpec'
+	IF N_Elements(name)        EQ 0 THEN name        = self.oDist.name + '_ESpec'
+	IF N_Elements(phi_range)   EQ 0 THEN phi_range   = [-180.0, 180.0]
+	IF N_Elements(theta_range) EQ 0 THEN theta_range = [0.0, 180.0]
 
 	;Allocate memory
 	dims      = Size(self.oDist, /DIMENSIONS)
@@ -765,44 +805,100 @@ THETA_RANGE=theta_range
 	nPhi      = dims[1]
 	nTheta    = dims[2]
 	nEnergy   = dims[3]
-	ESpec = FltArr( nTime, nEnergy )
-
-	;Step over each time
-	FOR i = 0, nTime - 1 DO BEGIN
-		oDist3D = self -> GetDist3D(i)
+	Espec     = FltArr(nTime, nEnergy)
+	
+;-----------------------------------------------------
+; Average Over Phi and Theta \\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	oPhi    = self.oDist['DEPEND_1']
+	oDPhi   = oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR']
+	oTheta  = self.oDist['DEPEND_2']
+	oDTheta = oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR']
+	
+	nPts = self.oDist -> GetNPts()
+	FOR i = 0, nPts - 1 DO BEGIN
+		;Angular bins within desired range
+		ip = Where(oPhi['DATA',i,*] GE phi_range[0] AND $
+		           oPhi['DATA',i,*] LE phi_range[1], np )
+		it = Where(oTheta['DATA',i,*] GE theta_range[0] AND $
+		           oTheta['DATA',i,*] LE theta_range[1], nt )
 		
-		;Reduce the distribution
-		ESpec[i,*] = oDist3D -> ESpec( e_bins, dE, $
-		                               NE_BINS     = nE_bins, $
-		                               PHI_RANGE   = phi_range, $
-		                               THETA_RANGE = theta_range )
-
-		;Destroy the object
-		Obj_Destroy, oDist3D
+		;PHI weight functions
+		;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+		;   - w   = v^2 sin(Theta) dTheta dPhi
+		;   - v is independent of phi so factors out of the numerator and denominator
+		weight = Rebin(oDPhi['DATA',i,ip] * !DToR, 1, np, nTheta, nEnergy, /SAMPLE)
+		
+		;Average over Phi
+		ThetaE = Total( weight * self.oDist['DATA',i,ip,*,*], 2 ) / Total(weight, 2)
+		weight = !Null
+		
+		;THETA weight function
+		IF self.elevation $
+			THEN weight = Cos( oTheta['DATA',i,it] * !DToR ) * oDTheta['DATA',i,it] * !DToR $
+			ELSE weight = Sin( oTheta['DATA',i,it] * !DToR ) * oDTheta['DATA',i,it] * !DToR
+		weight = Rebin(weight, 1, nt, nEnergy, /SAMPLE)
+		
+		;Average over theta
+		ESpec[i,*] = Total( weight * ThetaE[0,it,*], 2 ) / Total(weight, 2)
 	ENDFOR
+	
+;-----------------------------------------------------
+; Average Over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	
+	;Bins over which to average
+;	oPhi = self.oDist['DEPEND_1']
+;	ip = Where(oPhi['DATA'] GE phi_range[0] AND $
+;	           oPhi['DATA'] LE phi_range[1], np )
+;	
+;	;Compute weights
+;	;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+;	;   - w_i = v * dPhi_i
+;	;   - v is independent of phi so factors out of the numerator and denominator
+;	oDPhi = oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR']
+;	weight = Rebin(oDPhi['DATA',*,ip], nTime, np, nTheta, nEnergy, /SAMPLE)
+;	
+;	;Average over theta
+;	ThetaE = Total( weight * self.oDist['DATA',*,ip,*,*], 2 ) / Total(weight, 2)
+;	weight = !Null
+
+;-----------------------------------------------------
+; Average Over Theta \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	
+;	;Bins over which to average
+;	oTheta = self.oDist['DEPEND_2']
+;	it = Where(oTheta['DATA'] GE theta_range[0] AND $
+;	           oTheta['DATA'] LE theta_range[1], nt )
+;	
+;	;Compute weights
+;	;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+;	;   - w_i = v * sin(Theta_i) * dTheta_i * dv
+;	;   - v and dv are independent of theta so factors out of the numerator and denominator
+;	oTheta  = self.oDist['DEPEND_2']
+;	oDTheta = oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR']
+;	IF self.elevation $
+;		THEN weight = Cos( oTheta['DATA',*,it] * !DToR ) * oDTheta['DATA',*,it] * !DToR $
+;		ELSE weight = Sin( oTheta['DATA',*,it] * !DToR ) * oDTheta['DATA',*,it] * !DToR
+;	weight = Rebin(Rebin(weight, 1, nt, 1, /OVERWRITE), nTime, nt, nEnergy, /SAMPLE)
+;	
+;	;Average over theta
+;	ESpec = Total( weight * ThetaE[*,it,*], 2 ) / Total(weight, 2)
+;	weight = !Null
+
+;-------------------------------------------
+; Create Variable //////////////////////////
+;-------------------------------------------
 	
 	;Energy-time spectrogram
 	oESpec = MrTimeSeries( self.oDist['TIMEVAR'], ESpec, $
 	                       CACHE = tf_cache, $
 	                       NAME  = name, $
 	                       /NO_COPY )
-	
-	;Ordinate
-;	binName = name + '_EBins'
-;	oEBins  = Size(e_bins, /N_DIMENSIONS) EQ 2 $
-;	               ? MrTimeSeries( self.oTime, e_bins, NAME=binName, /NO_COPY ) $
-;	               : MrVariable( e_bins, NAME=binName, /NO_COPY )
-	
-	;Energy attributes
-;	oEBins -> AddAttr, 'UNITS', self.oEnergy['UNITS']
-;	oEBins -> AddAttr, 'TITLE', 'Energy'
-
-	;Energy bins have not changed
-	;   - MUST ALSO UPDATE MRDIST3D::SPECE
-	oEBins = self.oDist['DEPEND_3']
 
 	;Sepctrogram attributes
-	oESpec['DEPEND_1'] = oEBins
+	oESpec['DEPEND_1'] = self.oDist['DEPEND_3']
 	oESpec['SCALE']    = 1B
 	oESpec['LOG']      = 1B
 	oESpec['UNITS']    = self.oDist['UNITS']
@@ -1283,12 +1379,6 @@ END
 ;                       If set, the output variable will be added to the variable cache.
 ;       NAME:           in, optional, type=string, default=self.name + '_ThetaE'
 ;                       Name to be given to the output variable.
-;       NE_BINS:        in, optional, type=integer
-;                       Number of energy bins in the reduced distribution. The default
-;                           is to use the same bins and the original distribution.
-;       NPHI_BINS:      in, optional, type=integer
-;                       Number of polar angle bins in the reduced distribution. The
-;                           default is to use the same bins and the original distribution.
 ;       THETA_RANGE:    in, optional, type=FltArr(2), default=[0.0\, 180.0]
 ;                       The range in polar angle (degrees) over which to average.
 ;
@@ -1299,8 +1389,6 @@ END
 FUNCTION MrDist4D::PhiE, $
 CACHE=cache, $
 NAME=name, $
-NE_BINS=ne_bins, $
-NPHI_BINS=nPhi_bins, $
 THETA_RANGE=theta_range
 	Compile_Opt idl2
 	
@@ -1308,88 +1396,59 @@ THETA_RANGE=theta_range
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
-		IF N_Elements(oDist3D)  GT 0 THEN Obj_Destroy, oDist3D
 		IF N_Elements(oPhiE)    GT 0 THEN Obj_Destroy, oPhiE
-		IF N_Elements(oPhiBins) GT 0 THEN Obj_Destroy, oPhiBins
-		IF N_Elements(oEBins)   GT 0 THEN Obj_Destroy, oEBins
 		RETURN, !Null
 	ENDIF
-	
-	;Defaults
-	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_PhiE'
 
-;-------------------------------------------
-; Reduce the 4D Distribution ///////////////
-;-------------------------------------------
+;-----------------------------------------------------
+; Defaults \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
 
-	;Allocate memory
+	;Dimension sizes
 	dims    = Size(self.oDist, /DIMENSIONS)
-	nTimes  = dims[0]
+	nTime   = dims[0]
 	nPhi    = dims[1]
 	nTheta  = dims[2]
 	nEnergy = dims[3]
-	PhiE  = FltArr( nTimes, nPhi, nEnergy )
 
-	;Step over each time
-	FOR i = 0, nTimes - 1 DO BEGIN
-		oDist3D = self -> GetDist3D(i)
-		
-		;Reduce the distribution
-		PhiE[i,*,*] = oDist3D -> PhiE( phi, energy, dPhi, dE, $
-		                               NE_BINS     = ne_bins, $
-		                               NPHI_BINS   = nPhi_bins, $
-		                               THETA_RANGE = theta_range )
+	IF N_Elements(name)        EQ 0 THEN name        = self.oDist.name + '_PhiE'
+	IF N_Elements(theta_range) EQ 0 THEN theta_range = [0.0, 180.0]
 
-		;Destroy the 3D distribution
-		Obj_Destroy, oDist3D
-	ENDFOR
-
-;-------------------------------------------
-; Datasets /////////////////////////////////
-;-------------------------------------------
-	;Time variable
-	oTime = self.oDist['TIMEVAR']
+;-----------------------------------------------------
+; Average Over Theta \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
 	
+	;Bins over which to average
+	oTheta  = self.oDist['DEPEND_2']
+	it = Where(oTheta['DATA'] GE theta_range[0] AND $
+	           oTheta['DATA'] LE theta_range[1], nt )
+	
+	;Compute weights
+	;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+	;   - w_i = v * sin(Theta_i) * dTheta_i
+	;   - v is independent of theta so factors out of the numerator and denominator
+	oDTheta = oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR']
+	IF self.elevation $
+		THEN weight = Cos( oTheta['DATA',*,it] * !DToR ) * oDTheta['DATA',*,it] * !DToR $
+		ELSE weight = Sin( oTheta['DATA',*,it] * !DToR ) * oDTheta['DATA',*,it] * !DToR
+	weight = Rebin(Rebin(weight, nTime, 1, nt, 1, /OVERWRITE), nTime, nPhi, nt, nEnergy, /SAMPLE)
+	
+	;Average over theta
+	PhiE = Total( weight * self.oDist['DATA',*,*,it,*], 3 ) / Total(weight, 3)
+	weight = !Null
+
+;-------------------------------------------
+; Create Variable //////////////////////////
+;-------------------------------------------
 	;Theta-Energy distribution
-	oPhiE = MrTimeSeries( oTime, PhiE, $
+	oPhiE = MrTimeSeries( self.oDist['TIMEVAR'], PhiE, $
 	                      CACHE = cache, $
 	                      NAME  = name, $
 	                      /NO_COPY )
 	
-	;Phi
-	binName  = name + '_PhiBins'
-	oPhiBins = Size(phi, /N_DIMENSIONS) EQ 2 $
-	                 ? MrTimeSeries( oTime, phi, NAME=binName, /NO_COPY ) $
-	                 : MrVariable( phi, NAME=binName, /NO_COPY )
-	
-	;Energy
-	binName     = name + '_EnergyBins'
-	oEnergyBins = Size(energy, /N_DIMENSIONS) EQ 2 $
-	                  ? MrTimeSeries( oTime, energy, NAME=binName, /NO_COPY ) $
-	                  : MrVariable( energy, NAME=binName, /NO_COPY )
-
-;-------------------------------------------
-; Attributes ///////////////////////////////
-;-------------------------------------------
-	
-	;Phi attributes
-	oPhiBins['DELTA_MINUS'] = dPhi
-	oPhiBins['DELTA_PLUS']  = dPhi
-	oPhiBins['UNITS']       = 'degrees'
-	oPhiBins['TITLE']       = 'Azimuth'
-	oPhiBins['PLOT_TITLE']  = 'Azimuthal Bin Centers'
-	
-	;Energy attributes
-;	oEBins['UNITS'] = self.oEnergy['UNITS']
-;	oEBins['TITLE'] = 'Energy'
-
-	;Energy bins have not changed
-	;   - MUST ALSO UPDATE MRDIST3D::SPECE
-	oEBins = self.oDist['DEPEND_3']
-
-	;Distribution attributes
-	oPhiE['DEPEND_1'] = oPhiBins
-	oPhiE['DEPEND_2'] = oEBins
+	;Attributes
+	oPhiE['DEPEND_1'] = self.oDist['DEPEND_1']
+	oPhiE['DEPEND_2'] = self.oDist['DEPEND_3']
 	oPhiE['SCALE']    = 1B
 	oPhiE['LOG']      = 1B
 	oPhiE['UNITS']    = self.oDist['UNITS']
@@ -1419,32 +1478,25 @@ FUNCTION MrDist4D::PhiSpec, $
 CACHE=cache, $
 E_RANGE=E_range, $
 NAME=name, $
-NPHI_BINS=nPhi_bins, $
-THETA_RANGE=theta_range, $
-UNITS=units, $
-WEIGHT=weight
+THETA_RANGE=theta_range
 	Compile_Opt idl2
 	
 	Catch, the_error
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
-		IF N_Elements(oDist3D)  GT 0 THEN Obj_Destroy, oDist3D
 		IF N_Elements(oPhiSpec) GT 0 THEN Obj_Destroy, oPhiSpec
-		IF N_Elements(oPhiBins) GT 0 THEN Obj_Destroy, oPhiBins
 		RETURN, !Null
 	ENDIF
+
+;-----------------------------------------------------
+; Defaults \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
 	
-	;Defaults
-	IF N_Elements(units) EQ 0 THEN units = self.units
-	IF N_Elements(name)  EQ 0 THEN name  = self.oDist.name + '_PhiSpec'
-	
-	;Velocity-space weights
-	tf_weights = 0
-	IF N_Elements(weights) GT 0 THEN BEGIN
-		tf_weights = 1B
-		oW         = MrVar_Get(weights)
-	ENDIF
+	eV2J = MrConstants('eV2J')
+	IF N_Elements(name)        EQ 0 THEN name        = self.oDist.name + '_PhiSpec'
+	IF N_Elements(theta_range) EQ 0 THEN theta_range = [0.0, 180.0]
+	IF N_Elements(e_range)     EQ 0 THEN e_range     = [0.0, !values.f_infinity]
 
 	;Allocate memory
 	dims    = Size(self.oDist, /DIMENSIONS)
@@ -1454,49 +1506,96 @@ WEIGHT=weight
 	nEnergy = dims[3]
 	phiSpec = FltArr( nTime, nPhi )
 	
-	;Step over each time
-	FOR i = 0, nTime - 1 DO BEGIN
-		oDist3D = self -> GetDist3D(i)
-		IF units NE self.units THEN oDist3D -> SetUnits, units
+;-----------------------------------------------------
+; Average Over Theta and Energy \\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	oTheta = self.oDist['DEPEND_2']
+	oDTheta = oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR']
+	
+	oE  = self.oDist['DEPEND_3']
+	oDE = oE['DELTA_PLUS_VAR'] + oE['DELTA_MINUS_VAR']
+	v   = Sqrt( 2.0 * eV2J / self.mass * oE['DATA'] )
+	dv  = oDE['DATA'] * eV2J / (self.mass * v)
+	
+	nPts = self.oDist -> GetNPts()
+	FOR i = 0, nPts - 1 DO BEGIN
+		it = Where(oTheta['DATA',i,*] GE theta_range[0] AND $
+		           oTheta['DATA',i,*] LE theta_range[1], nt )
+		ie = Where(oE['DATA',i,*] GE e_range[0] AND $
+		           oE['DATA',i,*] LE e_range[1], nEn )
 		
-		;Get the weights
-		IF tf_weights THEN w = Reform(oW[i,*,*,*])
+		;THETA weights
+		;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+		;   - w = v * sin(Theta_i) * dTheta * dv
+		;   - v and dv are independent of theta so factors out sum over theta
+		IF self.elevation $
+			THEN weight = Cos( oTheta['DATA',i,it] * !DToR ) * oDTheta['DATA',i,it] * !DToR $
+			ELSE weight = Sin( oTheta['DATA',i,it] * !DToR ) * oDTheta['DATA',i,it] * !DToR
+		weight = Rebin(Reform(weight, 1, 1, nt, 1, /OVERWRITE), 1, nPhi, nt, nEnergy, /SAMPLE)
 		
-		;Reduce the distribution
-		phiSpec[i,*] = oDist3D -> PhiSpec_v2( phi_bins, dPhi, $
-		                                      E_RANGE     = e_range, $
-		                                      NPHI_BINS   = nPhi_bins, $
-		                                      THETA_RANGE = theta_range, $
-		                                      WEIGHT      = w )
-
-		;Destroy the object
-		Obj_Destroy, oDist3D
+		;Average over theta
+		PhiE = Total( weight * self.oDist['DATA',i,*,it,*], 3 ) / Total(weight, 3)
+		weight = !Null
+		
+		;Compute weights
+		weight = Rebin(Reform(v[i,*] * dv[i,*], 1, 1, nEn, /OVERWRITE), 1, nPhi, nEn, /SAMPLE)
+		
+		;Average over energy
+		phiSpec[i,*] = Total( weight * PhiE[0,*,ie], 3 ) / Total(weight, 3)
+		weight = !Null
 	ENDFOR
 	
-	;Time variable
-	oTime = self.oDist['TIMEVAR']
+
+;-----------------------------------------------------
+; Average Over Theta \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
 	
+;	;Bins over which to average
+;	oTheta = self.oDist['DEPEND_2']
+;	it = Where(oTheta['DATA'] GE theta_range[0] AND $
+;	           oTheta['DATA'] LE theta_range[1], nt )
+;	
+;	;Compute weights
+;	;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+;	;   - w_i = v * sin(Theta_i) * dTheta_i * dv
+;	;   - v and dv are independent of theta so factors out of the numerator and denominator
+;	oDTheta = oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR']
+;	IF self.elevation $
+;		THEN weight = Cos( oTheta['DATA',*,it] * !DToR ) * oDTheta['DATA',*,it] * !DToR $
+;		ELSE weight = Sin( oTheta['DATA',*,it] * !DToR ) * oDTheta['DATA',*,it] * !DToR
+;	weight = Rebin(Rebin(weight, nTime, 1, nt, 1, /OVERWRITE), nTime, nPhi, nt, nEnergy, /SAMPLE)
+;	
+;	;Average over theta
+;	PhiE = Total( weight * self.oDist['DATA',*,*,it,*], 3 ) / Total(weight, 3)
+;	weight = !Null
+
+;-----------------------------------------------------
+; Average Over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+;	oE  = self.oDist['DEPEND_3']
+;	oDE = oE['DELTA_PLUS_VAR'] + oE['DELTA_MINUS_VAR']
+;	v   = Sqrt( 2.0 * eV2J / self.mass * oE['DATA'] )
+;	dv  = oDE['DATA'] * eV2J / (self.mass * v)
+;	
+;	;Compute weights
+;	;   - w = v dv
+;	;   - Extra v from theta weights
+;	weight = Rebin(Reform(v * dv, 1, 1, nEnergy, /OVERWRITE), nTime, nPhi, nEnergy, /SAMPLE)
+;	
+;	;Average over energy
+;	phiSpec = Total( weight * PhiE, 3 ) / Total(weight, 3)
+
+;-------------------------------------------
+; Create Variable //////////////////////////
+;-------------------------------------------
 	;Phi-time spectrogram
-	oPhiSpec = MrTimeSeries( oTime, phiSpec, $
+	oPhiSpec = MrTimeSeries( self.oDist['TIMEVAR'], phiSpec, $
 	                         CACHE = cache, $
 	                         NAME  = name, $
 	                         /NO_COPY )
-	
-	;Abscissa
-	binName  = name + '_PhiBins'
-	oPhiBins = Size(phi_bins, /N_DIMENSIONS) EQ 2 $
-	                 ? MrTimeSeries( oTime, phi_bins, NAME=binName, /NO_COPY ) $
-	                 : MrVariable( phi_bins, NAME=binName, /NO_COPY )
-	
-	;Phi attributes
-	oPhiBins['DELTA_MINUS'] = dPhi
-	oPhiBins['DELTA_PLUS']  = dPhi
-	oPhiBins['UNITS']       = 'degrees'
-	oPhiBins['TITLE']       = 'Azimuth'
-	oPhiBins['PLOT_TITLE']  = 'Azimuthal Bin Centers'
 
 	;Sepctrogram attributes
-	oPhiSpec['DEPEND_1']   = oPhiBins
+	oPhiSpec['DEPEND_1']   = self.oDist['DEPEND_1']
 	oPhiSpec['SCALE']      = 1B
 	oPhiSpec['LOG']        = 1B
 	oPhiSpec['UNITS']      = self.oDist['UNITS']
@@ -1532,102 +1631,67 @@ END
 FUNCTION MrDist4D::PhiTheta, $
 CACHE=cache, $
 NAME=name, $
-E_RANGE=E_Range, $
-NPHI_BINS=nPhi_bins, $
-NTHETA_BINS=nTheta_bins
+E_RANGE=E_Range
 	Compile_Opt idl2
 	
 	Catch, the_error
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
-		IF N_Elements(oDist3D)    GT 0 THEN Obj_Destroy, oDist3D
 		IF N_Elements(oPhiTheta)  GT 0 THEN Obj_Destroy, oPhiTheta
-		IF N_Elements(oPhiBins)   GT 0 THEN Obj_Destroy, oPhiBins
-		IF N_Elements(oThetaBins) GT 0 THEN Obj_Destroy, oThetaBins
 		RETURN, !Null
 	ENDIF
-	
-	;Defaults
+
+;-----------------------------------------------------
+; Defaults \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_PhiTheta'
-
-;-------------------------------------------
-; Reduce the 4D Distribution ///////////////
-;-------------------------------------------
-
-	;Allocate memory
+	
+	;Dimension sizes
 	dims    = Size(self.oDist, /DIMENSIONS)
 	nTimes  = dims[0]
 	nPhi    = dims[1]
 	nTheta  = dims[2]
 	nEnergy = dims[3]
-	PhiE    = FltArr( nTimes, nPhi, nTheta )
+
+;-----------------------------------------------------
+; Average Over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	oE  = self.oDist['DEPEND_3']
+	oDE = oE['DELTA_PLUS_VAR'] + oE['DELTA_MINUS_VAR']
+	v   = Sqrt( 2.0 * eV2J / self.mass * oE['DATA'] )
+	dv  = oDE['DATA'] * eV2J / (self.mass * v)
 	
-	;Step over each time
-	FOR i = 0, N_Elements(nTimes) - 1 DO BEGIN
-		oDist3D = self -> GetDist3D(i)
-		
-		;Reduce the distribution
-		PhiTheta[i,*,*] = oDist -> ThetaPhi( phi, theta, dPhi, dTheta, $
-		                                     E_RANGE     = E_Range, $
-		                                     NPHI_BINS   = nPhi_bins, $
-		                                     NTHETA_BINS = nTheta_bins )
-		
-		;Destroy the 3D distribution
-		Obj_Destroy, oDist3D
-	ENDFOR
+	;Compute weights
+	;   - w = dv
+	;   - Extra v from phi weights
+	weight = Rebin(Reform(dv, 1, 1, 1, nEnergy, /OVERWRITE), nTime, nPhi, nTheta, nEnergy, /SAMPLE)
+	
+	;Average over energy
+	phiTheta = Total( weight * self.oDist['DATA'], 4 ) / Total(weight, 4)
+	
+	;Free memory
+	weight = !Null
+	v      = !Null
+	dv     = !Null
 
 ;-------------------------------------------
-; Datasets /////////////////////////////////
+; Create Variable //////////////////////////
 ;-------------------------------------------
-	;Time variable
-	oTime = self.oDist['TIMEVAR']
-	
-	;Theta-Energy distribution
-	oPhiTheta = MrTimeSeries( oT, PhiTheta, $
+	;Phi-Theta distribution
+	oPhiTheta = MrTimeSeries( self.oDist['TIMEVAR'], PhiTheta, $
 	                          CACHE = cache, $
 	                          NAME  = name, $
 	                          /NO_COPY )
-	
-	;Phi
-	binName  = name + '_PhiBins'
-	oPhiBins = Size(phi, /N_DIMENSIONS) EQ 2 $
-	                 ? MrTimeSeries( oTime, phi, NAME=binName, /NO_COPY ) $
-	                 : MrVariable( phi, NAME=binName, /NO_COPY )
-	
-	;Theta
-	binName    = name + '_ThetaBins'
-	oThetaBins = Size(theta, /N_DIMENSIONS) EQ 2 $
-	                 ? MrTimeSeries( oTime, theta_bins, NAME=binName, /NO_COPY ) $
-	                 : MrVariable( theta_bins, NAME=binName, /NO_COPY )
-
-;-------------------------------------------
-; Attributes ///////////////////////////////
-;-------------------------------------------
-	
-	;Phi attributes
-	oPhiBins['DELTA_MINUS'] = dPhi
-	oPhiBins['DELTA_PLUS']  = dPhi
-	oPhiBins['UNITS']       = 'degrees'
-	oPhiBins['TITLE']       = 'Azimuth'
-	oPhiBins['PLOT_TITLE']  = 'Azimuthal Bin Centers'
-	
-	;Theta attributes
-	oThetaBins['DELTA_MINUS'] = dTheta
-	oThetaBins['DELTA_PLUS']  = dTheta
-	oThetaBins['UNITS']      = 'degrees'
-	oThetaBins['TITLE']      = 'Polar Angle'
-	oThetaBins['PLOT_TITLE'] = 'Polar Bin Centers'
-	
-	;Distribution attributes
-	oPhiTheta['DEPEND_1'] = oPhiBins
-	oPhiTheta['DEPEND_2'] = oThetaBins
+	;Attributes
+	oPhiTheta['DEPEND_1'] = self.oDist['DEPEND_1']
+	oPhiTheta['DEPEND_2'] = self.oDist['DEPEND_2']
 	oPhiTheta['SCALE']    = 1B
 	oPhiTheta['LOG']      = 1B
 	oPhiTheta['UNITS']    = self.oDist['UNITS']
 	
 	;RETURN the 2D distribution
-	RETURN, oThetaBins
+	RETURN, oPhiTheta
 END
 
 
@@ -1646,6 +1710,7 @@ END
 ;-
 FUNCTION MrDist4D::Pressure, $
 CACHE=cache, $
+GROUND=ground, $
 NAME=name
 	Compile_Opt idl2
 	
@@ -1658,6 +1723,7 @@ NAME=name
 	
 	;Defaults
 	tf_cache = Keyword_Set(cache)
+	tf_ground = Keyword_Set(ground)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Pressure'
 	
 	;Must integrate over phase space
@@ -1699,13 +1765,15 @@ NAME=name
 	;    Pzz = m * \Integral{ f dVm dOmega Vm [ VM^(3/2) cos(t)^2               - 2 VM Uz cos(t)                              + Sqrt(VM) Uz^2  ]
 	;
 	
-	;We need the bulk velocity
-	;   - Convert km/s to m/s
-	oBulkV = 1e3 * Self -> Velocity()
-	vx     = Rebin(oBulkV['DATA',*,0], dims)
-	vy     = Rebin(oBulkV['DATA',*,1], dims)
-	vz     = Rebin(oBulkV['DATA',*,2], dims)
-	Obj_Destroy, oBulkV
+	;We need density and bulk velocity
+	;   - Convert km/s to cm/s
+	oN     = 1e6 * self -> Density(GROUND=ground)
+	oBulkV = 1e3 * self -> Velocity(GROUND=ground)
+	n      = oN['DATA']
+	vx     = oBulkV['DATA',*,0]
+	vy     = oBulkV['DATA',*,1]
+	vz     = oBulkV['DATA',*,2]
+	Obj_Destroy, [oN, oBulkV]
 	
 	;Extract phi and the bin sizes
 	oPhi = self.oDist['DEPEND_1']
@@ -1713,43 +1781,15 @@ NAME=name
 	dPhi = Rebin((oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR'])['DATA'] * deg2rad, dims)
 	
 	;Pxx
-	fxx1_temp = Total( self.oDist['DATA'] * Cos(phi)^2 * dPhi,        2 )
-	fxx2_temp = Total( self.oDist['DATA'] * Cos(phi)   * dPhi * vx,   2 ) * 2.0
-	fxx3_temp = Total( self.oDist['DATA']              * dPhi * vx^2, 2 )
-	
-	;Pxy
-	fxy1_temp = Total( self.oDist['DATA'] * Sin(phi) * Cos(phi) * dPhi,           2 )
-	fxy2_temp = Total( self.oDist['DATA'] * Cos(phi)            * dPhi * vy,      2 )
-	fxy3_temp = Total( self.oDist['DATA'] * Sin(phi)            * dPhi * vx,      2 )
-	fxy4_temp = Total( self.oDist['DATA']                       * dPhi * vx * vy, 2 )
-	
-	;Pxz
-	fxz1_temp = Total( self.oDist['DATA'] * Cos(phi) * dPhi,           2 )
-	fxz2_temp = Total( self.oDist['DATA'] * Cos(phi) * dPhi * vz,      2 )
-	fxz3_temp = Total( self.oDist['DATA']            * dPhi * vx,      2 )
-	fxz4_temp = Total( self.oDist['DATA']            * dPhi * vx * vz, 2 )
-	
-	;Pyy
-	fyy1_temp = Total( self.oDist['DATA'] * Sin(phi)^2 * dPhi,        2 )
-	fyy2_temp = Total( self.oDist['DATA'] * Sin(phi)   * dPhi * vy,   2 ) * 2.0
-	fyy3_temp = Total( self.oDist['DATA']              * dPhi * vy^2, 2 )
-	
-	;Pyz
-	fyz1_temp = Total( self.oDist['DATA'] * Sin(phi) * dPhi,           2 )
-	fyz2_temp = Total( self.oDist['DATA'] * Sin(phi) * dPhi * vz,      2 )
-	fyz3_temp = Total( self.oDist['DATA']            * dPhi * vy,      2 )
-	fyz4_temp = Total( self.oDist['DATA']            * dPhi * vy * vz, 2 )
-	
-	;Pzz
-	fzz1_temp = Total( self.oDist['DATA'] * dPhi,        2 )
-	fzz2_temp = Total( self.oDist['DATA'] * dPhi * vz,   2 ) * 2.0
-	fzz3_temp = Total( self.oDist['DATA'] * dPhi * vz^2, 2 )
+	fxx_temp = Total( self.oDist['DATA'] * Cos(phi)^2.0        * dPhi, 2 )
+	fxy_temp = Total( self.oDist['DATA'] * Sin(phi) * Cos(phi) * dPhi, 2 )
+	fxz_temp = Total( self.oDist['DATA'] * Cos(phi)            * dPhi, 2 )
+	fyy_temp = Total( self.oDist['DATA'] * Sin(phi)^2          * dPhi, 2 )
+	fyz_temp = Total( self.oDist['DATA'] * Sin(phi)            * dPhi, 2 )
+	fzz_temp = Total( self.oDist['DATA']                       * dPhi, 2 )
 	
 	phi  = !Null
 	dPhi = !Null
-	vx   = !Null
-	vy   = !Null
-	vz   = !Null
 
 ;-----------------------------------------------------
 ; Integrate over Theta \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -1760,37 +1800,12 @@ NAME=name
 	dTheta = Rebin((oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR'])['DATA'] * deg2rad, dims[[0,2,3]])
 	
 	;Pxx
-	fxx1_temp = Total( fxx1_temp * Sin(theta)^3 * dTheta, 2 )
-	fxx2_temp = Total( fxx2_temp * Sin(theta)^2 * dTheta, 2 )
-	fxx3_temp = Total( fxx3_temp * Sin(theta)   * dTheta, 2 )
-	
-	;Pxy
-	fxy1_temp = Total( fxy1_temp * Sin(theta)^3            * dTheta, 2 )
-	fxy2_temp = Total( fxy2_temp * Sin(theta)^2            * dTheta, 2 )
-	fxy3_temp = Total( fxy3_temp * Sin(theta) * Cos(theta) * dTheta, 2 )
-	fxy4_temp = Total( fxy4_temp * Sin(theta)              * dTheta, 2 )
-	
-	;Pxz
-	fxz1_temp = Total( fxz1_temp * Sin(theta)^2 * Cos(theta) * dTheta, 2 )
-	fxz2_temp = Total( fxz2_temp * Sin(theta)^2              * dTheta, 2 )
-	fxz3_temp = Total( fxz3_temp * Sin(theta)   * Cos(theta) * dTheta, 2 )
-	fxz4_temp = Total( fxz4_temp * Sin(theta)                * dTheta, 2 )
-	
-	;Pyy
-	fyy1_temp = Total( fyy1_temp * Sin(theta)^3 * dTheta, 2 )
-	fyy2_temp = Total( fyy2_temp * Sin(theta)^2 * dTheta, 2 )
-	fyy3_temp = Total( fyy3_temp * Sin(theta)   * dTheta, 2 )
-	
-	;Pyz
-	fyz1_temp = Total( fyz1_temp * Sin(theta)^2 * Cos(theta) * dTheta, 2 )
-	fyz2_temp = Total( fyz2_temp * Sin(theta)^2              * dTheta, 2 )
-	fyz3_temp = Total( fyz3_temp * Sin(theta)   * Cos(theta) * dTheta, 2 )
-	fyz4_temp = Total( fyz4_temp * Sin(theta)                * dTheta, 2 )
-	
-	;Pzz
-	fzz1_temp = Total( fzz1_temp * Sin(theta) * Cos(theta)^2 * dTheta, 2 )
-	fzz2_temp = Total( fzz2_temp * Sin(theta) * Cos(theta)   * dTheta, 2 )
-	fzz3_temp = Total( fzz3_temp * Sin(theta)                * dTheta, 2 )
+	fxx_temp = Total( fxx_temp * Sin(theta)^3                * dTheta, 2 )
+	fxy_temp = Total( fxy_temp * Sin(theta)^3                * dTheta, 2 )
+	fxz_temp = Total( fxz_temp * Sin(theta)^2 * Cos(theta)   * dTheta, 2 )
+	fyy_temp = Total( fyy_temp * Sin(theta)^3                * dTheta, 2 )
+	fyz_temp = Total( fyz_temp * Sin(theta)^2 * Cos(theta)   * dTheta, 2 )
+	fzz_temp = Total( fzz_temp * Sin(theta)   * Cos(theta)^2 * dTheta, 2 )
 
 ;-----------------------------------------------------
 ; Integrate over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -1809,17 +1824,40 @@ NAME=name
 	;
 	
 	;Convert energy from eV to J
-	v    = sqrt(2.0 * eV2J * Temporary(energy) / self.mass)
-	dv   = eV2J * Temporary(dEnergy) / (self.mass * v)
+	vM  = sqrt(2.0 * eV2J * Temporary(energy) / self.mass)
+	dvM = eV2J * Temporary(dEnergy) / (self.mass * vM)
 	
 	;SPACECRAFT POTENTIAL
 	IF N_Elements(self.oVsc) GT 0 THEN BEGIN
-		;Sign is charge dependent. E = q * V = 1/2 * m * v^2
-		sgn  = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
-		vsc  = Sqrt( 2.0 * q / self.mass * self.oVsc['DATA'] )
-		VM    = v^2 * (1 + signQ * (vsc^2 / v^2))
+		IF tf_ground THEN BEGIN
+			vsc = Rebin( Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass ), dims[[0,3]] )
+			v   = vM - vsc
+			
+			iBad = Where(v LT 0, nBad)
+			IF nBad GT 0 THEN BEGIN
+				tf_nan  = 1B
+				v[iBad] = 0;!Values.D_NaN
+			ENDIF
+				
+			vMc = v^2
+			
+		ENDIF ELSE BEGIN
+			;Sign is charge dependent. E = q * V = 1/2 * m * v^2
+			signQ = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
+			vsc   = Rebin( Sqrt( 2.0 * q / self.mass * self.oVsc['DATA'] ), dims[[0,3]] )
+			vMc   = vM^2 * (1 + signQ * (vsc^2 / vM^2))
+		
+			;Exclude bins that are below the spacecraft potential
+			;   - Total() will not include NaNs
+			tf_nan = 0B
+			iBad   = Where(vMc LT 0, nBad)
+			IF nBad GT 0 THEN BEGIN
+				tf_nan = 1B
+				vMc[iBad] = !Values.D_NaN
+			ENDIF
+		ENDELSE
 	ENDIF ELSE BEGIN
-		VM = v^2
+		vMc  = vM^2
 	ENDELSE
 	
 	
@@ -1831,47 +1869,23 @@ NAME=name
 	;   - f --> s^3/cm^6 --> s^3/m^6 * 1e12
 	
 	;Pxx
-	fxx1_temp = self.mass * Total( fxx1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fxx2_temp = self.mass * Total( fxx2_temp * v * VM           * dv, 2 ) * 1e12
-	fxx3_temp = self.mass * Total( fxx3_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pxx       = Temporary(fxx1_temp) - Temporary(fxx2_temp) + Temporary(fxx3_temp)
+	fxx_temp = Total( fxx_temp * vM * vMc^(3.0/2.0) * dvM, 2, NAN=tf_nan ) * 1e12
+	fxy_temp = Total( fxy_temp * vM * VMc^(3.0/2.0) * dvM, 2, NAN=tf_nan ) * 1e12
+	fxz_temp = Total( fxz_temp * vM * VMc^(3.0/2.0) * dvM, 2, NAN=tf_nan ) * 1e12
+	fyy_temp = Total( fyy_temp * vM * VMc^(3.0/2.0) * dvM, 2, NAN=tf_nan ) * 1e12
+	fyz_temp = Total( fyz_temp * vM * VMc^(3.0/2.0) * dvM, 2, NAN=tf_nan ) * 1e12
+	fzz_temp = Total( fzz_temp * vM * VMc^(3.0/2.0) * dvM, 2, NAN=tf_nan ) * 1e12
 	
-	;Pxy
-	fxy1_temp = self.mass * Total( fxy1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fxy2_temp = self.mass * Total( fxy2_temp * v * VM           * dv, 2 ) * 1e12
-	fxy3_temp = self.mass * Total( fxy3_temp * v * VM           * dv, 2 ) * 1e12
-	fxy4_temp = self.mass * Total( fxy4_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pxy       = Temporary(fxy1_temp) - Temporary(fxy2_temp) - Temporary(fxy3_temp) + Temporary(fxy4_temp)
+	Pxx = self.mass * (Temporary(fxx_temp) - n * vx * vx)
+	Pxy = self.mass * (Temporary(fxy_temp) - n * vx * vy)
+	Pxz = self.mass * (Temporary(fxz_temp) - n * vx * vz)
+	Pyy = self.mass * (Temporary(fyy_temp) - n * vy * vy)
+	Pyz = self.mass * (Temporary(fyz_temp) - n * vy * vz)
+	Pzz = self.mass * (Temporary(fzz_temp) - n * vz * vz)
 	
-	;Pxz
-	fxz1_temp = self.mass * Total( fxz1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fxz2_temp = self.mass * Total( fxz2_temp * v * VM           * dv, 2 ) * 1e12
-	fxz3_temp = self.mass * Total( fxz3_temp * v * VM           * dv, 2 ) * 1e12
-	fxz4_temp = self.mass * Total( fxz4_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pxz       = Temporary(fxz1_temp) - Temporary(fxz2_temp) - Temporary(fxz3_temp) + Temporary(fxz4_temp)
-	
-	;Pyy
-	fyy1_temp = self.mass * Total( fyy1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fyy2_temp = self.mass * Total( fyy2_temp * v * VM           * dv, 2 ) * 1e12
-	fyy3_temp = self.mass * Total( fyy3_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pyy       = Temporary(fyy1_temp) - Temporary(fyy2_temp) + Temporary(fyy3_temp)
-	
-	;Pyz
-	fyz1_temp = self.mass * Total( fyz1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fyz2_temp = self.mass * Total( fyz2_temp * v * VM           * dv, 2 ) * 1e12
-	fyz3_temp = self.mass * Total( fyz3_temp * v * VM           * dv, 2 ) * 1e12
-	fyz4_temp = self.mass * Total( fyz4_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pyz       = Temporary(fyz1_temp) - Temporary(fyz2_temp) - Temporary(fyz3_temp) + Temporary(fyz4_temp)
-	
-	;Pzz
-	fzz1_temp = self.mass * Total( fzz1_temp * v * VM^(3.0/2.0) * dv, 2 ) * 1e12
-	fzz2_temp = self.mass * Total( fzz2_temp * v * VM           * dv, 2 ) * 1e12
-	fzz3_temp = self.mass * Total( fzz3_temp * v * Sqrt(VM)     * dv, 2 ) * 1e12
-	Pzz       = Temporary(fzz1_temp) - Temporary(fzz2_temp) + Temporary(fzz3_temp)
-	
-	v  = !Null
-	dv = !Null
-	VM = !Null
+	vM  = !Null
+	dvM = !Null
+	vMc = !Null
 ;-----------------------------------------------------
 ; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
@@ -2025,6 +2039,185 @@ THETA_RANGE=theta_range
 	oDist['DEPEND_2'] = oThetaBins
 	oDist['SCALE']    = 1B
 	oDist['LOG']      = 1B
+	
+	RETURN, oDist
+END
+
+
+;+
+;   Rotate the distribution.
+;
+; :Params:
+;       TMATRIX:        in, required, type=TxNxMxL fltarr
+;                       The transformation matrix used to rotate the distribution
+;       ORIENTATION:    in, optional, type=boolean, default=1
+;                       Orientation of `THETA` and `PHI`. Options are::
+;                         1: PHI   - Positive from x-axis
+;                            THETA - Polar angle from z-axis
+;                         2: PHI   - Positive from y-axis
+;                            THETA - Polar angle from z-axis
+;                         3: PHI   - Positive from x-axis
+;                            THETA - Elevation angle from xy-plane
+;                         4: PHI   - Positive from y-axis
+;                            THETA - Elevation angle from xy-plane
+;                         5: PHI   - Positive from z-axis
+;                            THETA - Polar angle from y-axis
+;                         6: PHI   - Positive from x-axis
+;                            THETA - Polar angle from y-axis
+;                         7: PHI   - Positive from z-axis
+;                            THETA - Elevation angle from zx-plane
+;                         8: PHI   - Positive from x-axis
+;                            THETA - Elevation angle from zx-plane
+;                         9: PHI   - Positive from y-axis
+;                            THETA - Polar angle from x-axis
+;                        10: PHI   - Positive from z-axis
+;                            THETA - Polar angle from x-axis
+;                        11: PHI   - Positive from y-axis
+;                            THETA - Elevation angle from yz-plane
+;                        12: PHI   - Positive from z-axis
+;                            THETA - Elevation angle from yz-plane
+;
+; :Keywords:
+;       CACHE:          in, optional, type=boolean, default=0
+;                       If set, the output is added to the variable cache.
+;       NAME:           in, optional, type=integer
+;                       Name to be given to the variable object.
+;
+; :Returns:
+;       ODIST:          out, required, type=TxNxMxL fltarr
+;                       The re-binned distribution function.
+;
+;-
+FUNCTION MrDist4D::Rotate, tmatrix, orientation
+	Compile_Opt idl2
+	On_Error, 2
+	
+	oT = MrVar_Get(tmatrix)
+	IF N_Elements(orientation) EQ 0 THEN orientation = 1
+	
+	;Theta is an elevation angle
+	CASE orientation OF
+		 3: tf_elevation = 1B
+		 4: tf_elevation = 1B
+		 7: tf_elevation = 1B
+		 8: tf_elevation = 1B
+		11: tf_elevation = 1B
+		12: tf_elevation = 1B
+		ELSE: tf_elevation = 0B
+	ENDCASE
+	
+	;Dimensions
+	dims    = Size(self.oDist, /DIMENSIONS)
+	nTime   = dims[0]
+	nPhi    = dims[1]
+	nTheta  = dims[2]
+	nEnergy = dims[3]
+	
+;-------------------------------------------
+; Rotate Angles ////////////////////////////
+;-------------------------------------------
+	
+	;Create a cartesian grid
+	MrVar_Grid_MakeCart, self.oDist['DEPEND_1'], self.oDist['DEPEND_2'], oX, oY, oZ, /DEGREES
+
+	;Rotate the cartesian grid
+	;   - Negative sign converts from look-dirction to incident trajectory
+	MrVar_Grid_Cart2FAC, oT, -temporary(oX), -temporary(oY), -temporary(oZ), oX1, oX2, oX3
+	
+
+	;Convert to polar grid
+	MrVar_Grid_cart2sphere, oX1, oX2, oX3, oPhi, oTheta, $
+	                        /DEGREES, $
+	                        ORIENTATION = orientation
+
+;-------------------------------------------
+; Rebin Angles /////////////////////////////
+;-------------------------------------------
+	;Obtain the volume elements of the old configuration to use as weights when
+	;rebinning in the new configuration.
+	oDV = self -> VolumeElement()
+	
+	nPhi_bins = 32
+	phi_range = [-180.0, 180.0]
+	dPhi      = (phi_range[1] - phi_range[0]) / nPhi
+	phi_bins  = dPhi * FIndGen(nPhi) + phi_range[0]
+	
+	nTheta_bins = 16
+	theta_range = tf_elevation ? [-90.0, 90.0] : [0.0, 180.0]
+	dTheta      = (theta_range[1] - theta_range[0]) / nTheta
+	theta_bins  = dTheta * FIndGen(nTheta) + theta_range[0]
+	
+	rDist = FltArr(nTime, nPhi_bins, nTheta_bins, nEnergy)
+	
+	;Loop through time
+	FOR i = 0, nTime - 1 DO BEGIN
+		coords = [ Reform(oPhi['DATA',i,*,*],   1, nPhi*nTheta), $
+		           Reform(oTheta['DATA',i,*,*], 1, nPhi*nTheta) ]
+		
+		;Locate data within new bins
+		;   - Keep the number of Theta bins the same
+		;   - Average all PHI values within [-DELTA, DELTA] in each theta bin
+		cHist  = hist_nd( coords, $
+		                 MIN             = [ phi_range[0], theta_range[0] ], $
+		                 MAX             = [ phi_range[1], theta_range[1] ], $
+		                 NBINS           = [    nPhi_Bins,    nTheta_Bins ], $
+		                 REVERSE_INDICES = ri)
+		
+		;Loop over bins
+		FOR j = 0, nEnergy - 1 DO BEGIN
+			FOR k = 0, N_Elements(chist) - 1 DO BEGIN
+				;Skip empty bins
+				IF ri[k] EQ ri[k+1] THEN CONTINUE
+			
+				;Source indices
+				inds = ri[ri[k]:ri[k+1]-1]
+				isrc = Array_Indices([nPhi,nTheta], inds, /DIMENSIONS)
+			
+				;Destination indices
+				idest = Array_Indices([nPhi_bins,nTheta_bins], k, /DIMENSIONS)
+		
+				;Weight
+				w = Reform(oDV['DATA', i, isrc[0,*], isrc[1,*], j])
+			
+				;Re-bin
+				rDist[i, idest[0], idest[1], j] = Total( Reform(self.oDist['DATA',i, isrc[0,*], isrc[1,*], j]) * w ) / Total(w)
+			ENDFOR
+		ENDFOR
+	ENDFOR
+	
+
+;-------------------------------------------
+; Create New MrDist4D Object ///////////////
+;-------------------------------------------
+	outTime = self.oDist['DEPEND_0']
+	outPhi  = MrVariable(phi_bins)
+	outPhi['CATDESC']     = 'Azimuthal angle'
+	outPhi['DELTA_PLUS']  = dPhi
+	outPhi['DELTA_MINUS'] = dPhi
+	outPhi['TITLE']         = 'Phi'
+	outPhi['UNITS']         = 'degrees'
+	outPhi['SI_CONVERSION'] = '0.017453292>radians'
+	
+	outTheta = MrVariable(theta_bins)
+	outTheta['CATDESC']       = (tf_elevation ? 'Polar angle' : 'Elevation angle')
+	outTheta['DELTA_PLUS']    = dTheta
+	outTheta['DELTA_MINUS']   = dTheta
+	outTheta['TITLE']         = 'Theta'
+	outTheta['UNITS']         = 'degrees'
+	outTheta['SI_CONVERSION'] = '0.017453292>radians'
+	
+	outDist = MrTimeSeries(outTime, rDist, /NO_COPY)
+	outDist['DEPEND_1'] = outPhi
+	outDist['DEPEND_2'] = outTheta
+	outDist['DEPEND_3'] = self.oDist['DEPEND_3']
+	outDist['UNITS']    = self.oDist['UNITS']
+
+	;Create new distribution
+	oDist = MrDist4D( outDist, $
+	                  ELEVATION = tf_elevation, $
+	                  SPECIES   = theSpecies, $
+	                  UNITS     = self.units )
+	
 	
 	RETURN, oDist
 END
@@ -2263,7 +2456,12 @@ END
 
 
 ;+
-;   Set the phi array.
+;   Set the energy array.
+;
+;   If the DELTA_PLUS and DELTA_MINUS attributes do not exist, they are created and set
+;   such that dE/E is constant and is determined from the first two energy bins. If the
+;   attribute values are not time-dependent, they are expanded and turned into
+;   MrTimeSeries objects.
 ;
 ; :Params:
 ;       PHI:            in, required, type=Nx1 or NxM array
@@ -2410,6 +2608,12 @@ END
 
 ;+
 ;   Set the phi array.
+;
+;   If the DELTA_PLUS and DELTA_MINUS attributes do not exist, they are created and set to
+;   half the mean spacing between points. If the attribute values are not time-dependent,
+;   they are expanded and turned into MrTimeSeries objects.
+;
+;   If the UNITS attribute is radians, values are converted to degrees.
 ;
 ; :Params:
 ;       PHI:            in, required, type=Nx1 or NxM array
@@ -2589,11 +2793,17 @@ END
 
 
 ;+
-;   Set the phi array.
+;   Set the theta array.
+;
+;   If the DELTA_PLUS and DELTA_MINUS attributes do not exist, they are created and set to
+;   half the mean spacing between points. If the attribute values are not time-dependent,
+;   they are expanded and turned into MrTimeSeries objects.
+;
+;   If the UNITS attribute is radians, values are converted to degrees.
 ;
 ; :Params:
-;       PHI:            in, required, type=Nx1 or NxM array
-;                       Azimuthal coordinates of the distribution pixels. Can be the name
+;       THETA:          in, required, type=Nx1 or NxM array
+;                       Polar coordinates of the distribution pixels. Can be the name
 ;                           or reference of a MrVariable object, or the variable data.
 ;                           IF the variable is a MrTimeSeries object, its time property
 ;                           must be the same as that of the implicit distribution.
@@ -2666,7 +2876,7 @@ RADIANS=radians
 	ENDELSE
 	
 ;-----------------------------------------------------
-; Delta Plus \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+; Make Delta Plus Time-Dependent \\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	IF oTheta -> HasAttr('DELTA_PLUS_VAR') THEN BEGIN
 		oTheta_dPlus = oTheta['DELTA_PLUS_VAR']
@@ -2692,7 +2902,7 @@ RADIANS=radians
 	oTheta['DELTA_PLUS_VAR'] = oTheta_dPlus
 	
 ;-----------------------------------------------------
-; Delta Minus \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+; Make Delta Minus Time-Dependent \\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	IF oTheta -> HasAttr('DELTA_MINUS_VAR') THEN BEGIN
 		oTheta_dMinus = oTheta['DELTA_MINUS_VAR']
@@ -2726,7 +2936,7 @@ RADIANS=radians
 		THEN Message, 'theta and DIST have different time objects.'
 
 ;-----------------------------------------------------
-; Units \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+; Make Units Degrees \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	IF N_Elements(degrees) GT 0 && N_Elements(radians) GT 0 THEN BEGIN
 		Message, 'DEGREES and RADIANS are mutually exclusive.'
@@ -2766,6 +2976,186 @@ END
 
 
 ;+
+;   Reduce the 3D distribution FUNCTION to a 1D distribution in polar angle.
+;
+; :Keywords:
+;       E_RANGE:        in, optional, type=FltArr(2), default=[min, max]
+;                       The range in energy, in electron volts (eV) over which to average.
+;       NTHETA_BINS:    in, optional, type=integer
+;                       Number of polar angle bins in the reduced distribution. The
+;                           default is to use the same bins and the original distribution.
+;       PHI_RANGE:      in, optional, type=FltArr(2), default=[0.0\, 360.0]
+;                       The range in azimuthal angle (degrees) over which to average.
+;
+; :Returns:
+;       OTHETASPEC:     out, required, type=MrTimeSeries
+;                       A 1D distribution in time, averaged over energy and azimuth.
+;-
+pro MrDist4D::Spectra, $
+CACHE=cache, $
+E_RANGE=e_range, $
+ESPEC=oESpec, $
+;NAME=name, $
+PHI_RANGE=phi_range, $
+PHISPEC=oPhiSpec, $
+THETA_RANGE=theta_range, $
+THETASPEC=oThetaSpec
+	Compile_Opt idl2
+	
+	Catch, the_error
+	IF the_error NE 0 THEN BEGIN
+		Catch, /CANCEL
+		MrPrintF, 'LogErr'
+		IF N_Elements(oESpec)     GT 0 THEN Obj_Destroy, oESpec
+		IF N_Elements(oPhiSpec)   GT 0 THEN Obj_Destroy, oPhiSpec
+		IF N_Elements(oThetaSpec) GT 0 THEN Obj_Destroy, oThetaSpec
+		RETURN
+	ENDIF
+
+;-----------------------------------------------------
+; Defaults \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	eV2J     = MrConstants('eV2J')
+	tf_cache = Keyword_Set(cache)
+	IF N_Elements(name)        EQ 0 THEN name        = self.oDist.name + '_ThetaSpec'
+	IF N_Elements(phi_range)   EQ 0 THEN phi_range   = [-180.0, 180.0]
+	IF N_Elements(theta_range) EQ 0 THEN theta_range = [0.0, 180.0]
+	IF N_Elements(e_range)     EQ 0 THEN e_range     = [0.0, !values.f_infinity]
+
+	;Dimension sizes
+	dims      = Size(self.oDist, /DIMENSIONS)
+	nTime     = dims[0]
+	nPhi      = dims[1]
+	nTheta    = dims[2]
+	nEnergy   = dims[3]
+	
+	phiSpec   = FltArr( nTime, nPhi )
+	thetaSpec = FltArr( nTime, nTheta )
+	Espec     = FltArr( nTime, nEnergy )
+	
+;-----------------------------------------------------
+; Average Over Phi and Energy \\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	oPhi = self.oDist['DEPEND_1']
+	oDPhi = oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR']
+	
+	oTheta  = self.oDist['DEPEND_2']
+	oDTheta = oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR']
+	
+	oE  = self.oDist['DEPEND_3']
+	oDE = oE['DELTA_PLUS_VAR'] + oE['DELTA_MINUS_VAR']
+	v   = Sqrt( 2.0 * eV2J / self.mass * oE['DATA'] )
+	dv  = oDE['DATA'] * eV2J / (self.mass * v)
+	
+	nPts = self.oDist -> GetNPts()
+	FOR i = 0, nPts - 1 DO BEGIN
+		;Bins within desired range
+		ip = Where(oPhi['DATA',i,*] GE phi_range[0] AND $
+		           oPhi['DATA',i,*] LE phi_range[1], np )
+		it = Where(oTheta['DATA',i,*] GE theta_range[0] AND $
+		           oTheta['DATA',i,*] LE theta_range[1], nt )
+		ie = Where(oE['DATA',i,*] GE e_range[0] AND $
+		           oE['DATA',i,*] LE e_range[1], nEn )
+
+	;-----------------------------------------------------
+	; 3D Spectra \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+	;-----------------------------------------------------
+		
+		;THETA-ENERGY
+		;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+		;   - w = v * dPhi * dv
+		;   - v and dv are independent of phi so factors out of the sum over phi
+		w_phi  = Rebin(oDPhi['DATA',i,ip], 1, np, nTheta, nEnergy, /SAMPLE)
+		ThetaE = Total( w_phi * self.oDist['DATA',i,ip,*,*], 2 ) / Total(w_phi, 2)
+		w_phi  = !Null
+	
+		;PHI-ENERGY
+		IF self.elevation $
+			THEN w_theta = Cos( oTheta['DATA',i,it] * !DToR ) * oDTheta['DATA',i,it] * !DToR $
+			ELSE w_theta = Sin( oTheta['DATA',i,it] * !DToR ) * oDTheta['DATA',i,it] * !DToR
+		w_theta = Rebin(Reform(w_theta, 1, 1, nt, 1, /OVERWRITE), 1, nPhi, nt, nEnergy, /SAMPLE)
+		PhiE    = Total( w_theta * self.oDist['DATA',i,*,it,*], 3 ) / Total(w_theta, 3)
+		
+		;PHI-THETA
+		;   - w = dv
+		;   - Extra v from phi weights
+		w_energy = Rebin(Reform(dv[i,ie], 1, 1, 1, nEn, /OVERWRITE), 1, nPhi, nTheta, nEn, /SAMPLE)
+		PhiTheta = Total( w_energy * self.oDist['DATA',i,*,*,ie], 4 ) / Total(w_energy, 4)
+
+	;-----------------------------------------------------
+	; 2D Spectra \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+	;-----------------------------------------------------
+		
+		;PHI
+		w_energy     = Rebin(Reform(v[i,*] * dv[i,*], 1, 1, nEn, /OVERWRITE), 1, nPhi, nEn, /SAMPLE)
+		phiSpec[i,*] = Total( w_energy * PhiE[0,*,ie], 3 ) / Total(w_energy, 3)
+		
+		;THETA
+		w_energy       = Rebin(Reform(v[i,ie] * dv[i,ie], 1, 1, nEn, /OVERWRITE), 1, nTheta, nEn, /SAMPLE)
+		thetaSpec[i,*] = Total( w_energy * ThetaE[0,*,ie], 3 ) / Total(w_energy, 3)
+		
+		;ENERGY
+		IF self.elevation $
+			THEN w_theta = Cos( oTheta['DATA',i,it] * !DToR ) * oDTheta['DATA',i,it] * !DToR $
+			ELSE w_theta = Sin( oTheta['DATA',i,it] * !DToR ) * oDTheta['DATA',i,it] * !DToR
+		w_theta    = Rebin(w_theta, 1, nt, nEnergy, /SAMPLE)
+		ESpec[i,*] = Total( w_theta * ThetaE[0,it,*], 2 ) / Total(w_theta, 2)
+	ENDFOR
+
+;-------------------------------------------
+; Energy ///////////////////////////////////
+;-------------------------------------------
+	
+	;Energy-time spectrogram
+	oESpec = MrTimeSeries( self.oDist['TIMEVAR'], ESpec, $
+	                       CACHE = tf_cache, $
+	                       NAME  = self.oDist.name + '_espec', $
+	                       /NO_COPY )
+
+	;Sepctrogram attributes
+	oESpec['DEPEND_1'] = self.oDist['DEPEND_3']
+	oESpec['SCALE']    = 1B
+	oESpec['LOG']      = 1B
+	oESpec['UNITS']    = self.oDist['UNITS']
+	
+;-------------------------------------------
+; Phi //////////////////////////////////////
+;-------------------------------------------
+	;Phi-time spectrogram
+	oPhiSpec = MrTimeSeries( self.oDist['TIMEVAR'], phiSpec, $
+	                         CACHE = tf_cache, $
+	                         NAME  = self.oDist.name + '_phispec', $
+	                         /NO_COPY )
+
+	;Sepctrogram attributes
+	oPhiSpec['DEPEND_1']   = self.oDist['DEPEND_1']
+	oPhiSpec['SCALE']      = 1B
+	oPhiSpec['LOG']        = 1B
+	oPhiSpec['UNITS']      = self.oDist['UNITS']
+	oPhiSpec['TITLE']      = 'Phi Dist'
+	oPhiSpec['PLOT_TITLE'] = 'Distribution in Phi'
+
+;-------------------------------------------
+; Theta ////////////////////////////////////
+;-------------------------------------------
+	
+	;Theta-time spectrogram
+	oThetaSpec = MrTimeSeries( self.oDist['TIMEVAR'], thetaSpec, $
+	                           CACHE = tf_cache, $
+	                           NAME  = self.oDist.name + '_thetaspec', $
+	                           /NO_COPY )
+	
+	;Attributes
+	oThetaSpec['DEPEND_1']   = self.oDist['DEPEND_2']
+	oThetaSpec['SCALE']      = 1B
+	oThetaSpec['LOG']        = 1B
+	oThetaSpec['UNITS']      = self.oDist['UNITS']
+	oThetaSpec['TITLE']      = 'Theta Dist'
+	oThetaSpec['PLOT_TITLE'] = 'Distribution in Theta'
+END
+
+
+;+
 ;   Reduce the 3D distribution FUNCTION to a 2D distribution in polar angle and energy,
 ;   averaging over azimuth angle.
 ;
@@ -2790,8 +3180,6 @@ END
 FUNCTION MrDist4D::ThetaE, $
 CACHE=cache, $
 NAME=name, $
-NE_BINS=ne_bins, $
-NTHETA_BINS=nTheta_bins, $
 PHI_RANGE=phi_range
 	Compile_Opt idl2
 	
@@ -2799,88 +3187,55 @@ PHI_RANGE=phi_range
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
-		IF N_Elements(oDist3D)    GT 0 THEN Obj_Destroy, oDist3D
 		IF N_Elements(oThetaE)    GT 0 THEN Obj_Destroy, oThetaE
-		IF N_Elements(oThetaBins) GT 0 THEN Obj_Destroy, oThetaBins
-		IF N_Elements(oEBins)     GT 0 THEN Obj_Destroy, oEBins
 		RETURN, !Null
 	ENDIF
+
+;-----------------------------------------------------
+; Defaults \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	IF N_Elements(name)      EQ 0 THEN name      = self.oDist.name + '_ThetaE'
+	IF N_Elements(phi_range) EQ 0 THEN phi_range = [-180.0, 180.0]
 	
-	;Defaults
-	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_ThetaE'
-
-;-------------------------------------------
-; Reduce the 4D Distribution ///////////////
-;-------------------------------------------
-
-	;Allocate memory
+	;Dimension sizes
 	dims    = Size(self.oDist, /DIMENSIONS)
 	nTimes  = dims[0]
 	nPhi    = dims[1]
 	nTheta  = dims[2]
 	nEnergy = dims[3]
-	ThetaE  = FltArr( nTimes, nTheta, nEnergy )
 	
-	;Step over each time
-	FOR i = 0, nTimes - 1 DO BEGIN
-		oDist3D = self -> GetDist3D(i)
-		
-		;Reduce the distribution
-		ThetaE[i,*,*] = oDist3D -> ThetaE( theta, energy, dTheta, dE, $
-		                                   NE_BINS     = ne_bins, $
-		                                   NTHETA_BINS = nTheta_bins, $
-		                                   PHI_RANGE   = phi_range )
-		                                   
-		;Destroy the 3D distribution
-		Obj_Destroy, oDist3D
-	ENDFOR
+;-----------------------------------------------------
+; Average Over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	
+	;Bins over which to average
+	oPhi = self.oDist['DEPEND_11']
+	ip = Where(oPhi['DATA'] GE phi_range[0] AND $
+	           oPhi['DATA'] LE phi_range[1], np )
+	
+	;Compute weights
+	;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+	;   - w_i = v * dPhi_i
+	;   - v is independent of phi so factors out of the numerator and denominator
+	oDPhi = oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR']
+	weight = Rebin(oDPhi['DATA',*,ip], nTime, np, nTheta, nEnergy, /SAMPLE)
+	
+	;Average over theta
+	ThetaE = Total( weight * self.oDist['DATA',*,ip,*,*], 2 ) / Total(weight, 2)
+	weight = !Null
 
 ;-------------------------------------------
-; Datasets /////////////////////////////////
+; Create Variable //////////////////////////
 ;-------------------------------------------
-	;Time variable
-	oTime = self.oDist['TIMEVAR']
-	
 	;Theta-Energy distribution
-	oThetaE = MrTimeSeries( oTime, ThetaE, $
+	oThetaE = MrTimeSeries( self.oDist['TIMEVAR'], ThetaE, $
 	                        CACHE = cache, $
 	                        NAME  = name, $
 	                        /NO_COPY )
-	
-	;Theta
-	binName    = name + '_ThetaBins'
-	oThetaBins = Size(theta, /N_DIMENSIONS) EQ 2 $
-	                 ? MrTimeSeries( oTime, theta, NAME=binName, /NO_COPY ) $
-	                 : MrVariable( theta, NAME=binName, /NO_COPY )
-	
-	;Energy
-	binName     = name + '_EnergyBins'
-	oEnergyBins = Size(energy, /N_DIMENSIONS) EQ 2 $
-	                  ? MrTimeSeries( oTime, energy, NAME=binName, /NO_COPY ) $
-	                  : MrVariable( energy, NAME=binName, /NO_COPY )
 
-;-------------------------------------------
-; Attributes ///////////////////////////////
-;-------------------------------------------
-	
-	;Theta attributes
-	oThetaBins['DELTA_MINUS'] = dTheta
-	oThetaBins['DELTA_PLUS']  = dTheta
-	oThetaBins['UNITS']      = 'degrees'
-	oThetaBins['TITLE']      = 'Polar Angle'
-	oThetaBins['PLOT_TITLE'] = 'Polar Bin Centers'
-	
-	;Energy attributes
-;	oEBins['UNITS'] = self.oEnergy['UNITS']
-;	oEBins['TITLE'] = 'Energy'
-
-	;Energy bins have not changed
-	;   - MUST ALSO UPDATE MRDIST3D::SPECE
-	oEBins = self.oDist['DEPEND_3']
-
-	;Distribution attributes
-	oThetaE['DEPEND_1'] = oThetaBins
-	oThetaE['DEPEND_2'] = oEBins
+	;Attributes
+	oThetaE['DEPEND_1'] = self.oDist['DEPEND_2']
+	oThetaE['DEPEND_2'] = self.oDist['DEPEND_3']
 	oThetaE['SCALE']    = 1B
 	oThetaE['LOG']      = 1B
 	oThetaE['UNITS']    = self.oDist['UNITS']
@@ -2910,7 +3265,6 @@ FUNCTION MrDist4D::ThetaSpec, $
 CACHE=cache, $
 E_RANGE=e_range, $
 NAME=name, $
-NTHETA_BINS=nTheta_bins, $
 PHI_RANGE=phi_range
 	Compile_Opt idl2
 	
@@ -2918,62 +3272,111 @@ PHI_RANGE=phi_range
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
-		IF N_Elements(oDist3D)    GT 0 THEN Obj_Destroy, oDist3D
 		IF N_Elements(oThetaSpec) GT 0 THEN Obj_Destroy, oThetaSpec
-		IF N_Elements(oThetaBins) GT 0 THEN Obj_Destroy, oThetaBins
 		RETURN, !Null
 	ENDIF
-	
-	;Defaults
-	tf_cache = Keyword_Set(cache)
-	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_ThetaSpec'
 
-	;Allocate memory
+;-----------------------------------------------------
+; Defaults \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	eV2J     = MrConstants('eV2J')
+	tf_cache = Keyword_Set(cache)
+	IF N_Elements(name)      EQ 0 THEN name      = self.oDist.name + '_ThetaSpec'
+	IF N_Elements(phi_range) EQ 0 THEN phi_range = [-180.0, 180.0]
+	IF N_Elements(e_range)   EQ 0 THEN e_range   = [0.0, !values.f_infinity]
+
+	;Dimension sizes
 	dims      = Size(self.oDist, /DIMENSIONS)
 	nTime     = dims[0]
 	nPhi      = dims[1]
 	nTheta    = dims[2]
 	nEnergy   = dims[3]
-	ThetaSpec = FltArr( nTime, nTheta )
+	thetaSpec = FltArr( nTime, nTheta )
 	
-	;Step over each time
-	FOR i = 0, nTime - 1 DO BEGIN
-		oDist3D = self -> GetDist3D(i)
+;-----------------------------------------------------
+; Average Over Phi and Energy \\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	oPhi = self.oDist['DEPEND_1']
+	oDPhi = oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR']
+	
+	oE  = self.oDist['DEPEND_3']
+	oDE = oE['DELTA_PLUS_VAR'] + oE['DELTA_MINUS_VAR']
+	v   = Sqrt( 2.0 * eV2J / self.mass * oE['DATA'] )
+	dv  = oDE['DATA'] * eV2J / (self.mass * v)
+	
+	nPts = self.oDist -> GetNPts()
+	FOR i = 0, nPts - 1 DO BEGIN
+		;Bins within desired range
+		ip = Where(oPhi['DATA'] GE phi_range[0] AND $
+		           oPhi['DATA'] LE phi_range[1], np )
+		ie = Where(oE['DATA',i,*] GE e_range[0] AND $
+		           oE['DATA',i,*] LE e_range[1], nEn )
 		
-		;Reduce the distribution
-		ThetaSpec[i,*] = oDist3D -> ThetaSpec(theta_bins, dTheta, $
-		                                      E_RANGE     = e_range, $
-		                                      NTHETA_BINS = nTheta_bins, $
-		                                      PHI_RANGE   = phi_range )
-
-		;Destroy the object
-		Obj_Destroy, oDist3D
-	ENDFOR
+		;PHI weights
+		;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+		;   - w = v * dPhi * dv
+		;   - v and dv are independent of phi so factors out of the sum over phi
+		weight = Rebin(oDPhi['DATA',i,ip], 1, np, nTheta, nEnergy, /SAMPLE)
+		
+		;Average over phi
+		ThetaE = Total( weight * self.oDist['DATA',i,ip,*,*], 2 ) / Total(weight, 2)
+		weight = !Null
 	
-	;Time variable
-	oTime = self.oDist['TIMEVAR']
+		;ENERGY weights
+		weight = Rebin(Reform(v[i,ie] * dv[i,ie], 1, 1, nEn, /OVERWRITE), 1, nTheta, nEn, /SAMPLE)
+
+		;Average over energy
+		thetaSpec[i,*] = Total( weight * ThetaE[0,*,ie], 3 ) / Total(weight, 3)
+	ENDFOR
+
+;-----------------------------------------------------
+; Average Over Phi \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	
+;	;Bins over which to average
+;	oPhi = self.oDist['DEPEND_1']
+;	ip = Where(oPhi['DATA'] GE phi_range[0] AND $
+;	           oPhi['DATA'] LE phi_range[1], np )
+;	
+;	;Compute weights
+;	;   - avg = Sum_i=0^nTheta f_i w_i / Sum w_i, where w_i are the weights
+;	;   - w_i = v * dPhi_i * dv
+;	;   - v and dv are independent of phi so factors out of the numerator and denominator
+;	oDPhi = oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR']
+;	weight = Rebin(oDPhi['DATA',*,ip], nTime, np, nTheta, nEnergy, /SAMPLE)
+;	
+;	;Average over theta
+;	ThetaE = Total( weight * self.oDist['DATA',*,ip,*,*], 2 ) / Total(weight, 2)
+;	weight = !Null
+
+;-----------------------------------------------------
+; Average Over Energy \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+;	oE  = self.oDist['DEPEND_3']
+;	oDE = oE['DELTA_PLUS_VAR'] + oE['DELTA_MINUS_VAR']
+;	v   = Sqrt( 2.0 * eV2J / self.mass * oE['DATA'] )
+;	dv  = oDE['DATA'] * eV2J / (self.mass * v)
+;	
+;	;Compute weights
+;	;   - w = v dv
+;	;   - Extra v from phi weights
+;	weight = Rebin(Reform(v * dv, 1, 1, nEnergy, /OVERWRITE), nTime, nTheta, nEnergy, /SAMPLE)
+;	
+;	;Average over energy
+;	thetaSpec = Total( weight * ThetaE, 3 ) / Total(weight, 3)
+
+;-------------------------------------------
+; Create Variable //////////////////////////
+;-------------------------------------------
 	
 	;Theta-time spectrogram
-	oThetaSpec = MrTimeSeries( oTime, thetaSpec, $
+	oThetaSpec = MrTimeSeries( self.oDist['TIMEVAR'], thetaSpec, $
 	                           CACHE = tf_cache, $
 	                           NAME  = name, $
 	                           /NO_COPY )
 	
-	;Abscissa
-	binName    = name + '_ThetaBins'
-	oThetaBins = Size(theta_bins, /N_DIMENSIONS) EQ 2 $
-	                 ? MrTimeSeries( oTime, theta_bins, NAME=binName, /NO_COPY ) $
-	                 : MrVariable( theta_bins, NAME=binName, /NO_COPY )
-	
-	;Theta attributes
-	oThetaBins['DELTA_MINUS'] = dTheta
-	oThetaBins['DELTA_PLUS']  = dTheta
-	oThetaBins['UNITS']      = 'degrees'
-	oThetaBins['TITLE']      = 'Polar Angle'
-	oThetaBins['PLOT_TITLE'] = 'Polar Bin Centers'
-
-	;Sepctrogram attributes
-	oThetaSpec['DEPEND_1']   = oThetaBins
+	;Attributes
+	oThetaSpec['DEPEND_1']   = self.oDist['DEPEND_2']
 	oThetaSpec['SCALE']      = 1B
 	oThetaSpec['LOG']        = 1B
 	oThetaSpec['UNITS']      = self['UNITS']
@@ -3015,7 +3418,7 @@ NAME=name
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Temperature'
 
 	;Conversion from Kelvin to eV
-	eV2K = 11600.0
+	eV2K = MrConstants('eV2K')
 	
 	;Compute the pressure
 	oN = self -> Density()
@@ -3064,6 +3467,7 @@ END
 ;-
 FUNCTION MrDist4D::Velocity, $
 CACHE=cache, $
+GROUND=ground, $
 NAME=name
 	Compile_Opt idl2
 	
@@ -3076,6 +3480,7 @@ NAME=name
 	
 	;Defaults
 	tf_cache = Keyword_Set(cache)
+	tf_ground = Keyword_Set(ground)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_Velocity'
 	
 	;Must integrate over phase space
@@ -3145,13 +3550,39 @@ NAME=name
 	
 	;Spacecraft potential correction
 	IF N_Elements(self.oVsc) GT 0 THEN BEGIN
-		;Sign is charge dependent. E = q * V = 1/2 * m * v^2
-		sgn  = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
-		vsc  = Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass )
+		IF tf_ground THEN BEGIN
+			vsc = Rebin( Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass ), dims[[0,3]] )
+			v  -= vsc
+			
+			iBad = Where(v LT 0, nBad)
+			IF nBad GT 0 THEN BEGIN
+				tf_nan  = 1B
+				v[iBad] = 0;!Values.D_NaN
+			ENDIF
+				
+			VM  = v^2
 		
-		Vx = Total( Temporary(fx_temp) * v * (v^2 + sgn*vsc^2) * dv, 2 ) * 1e12
-		Vy = Total( Temporary(fy_temp) * v * (v^2 + sgn*vsc^2) * dv, 2 ) * 1e12
-		Vz = Total( Temporary(fz_temp) * v * (v^2 + sgn*vsc^2) * dv, 2 ) * 1e12
+		ENDIF ELSE BEGIN
+			;Sign is charge dependent. E = q * V = 1/2 * m * v^2
+			sgn  = Round(self.mass / MrConstants('m_p')) EQ 0 ? -1.0 : 1.0
+			vsc  = Rebin( Sqrt( 2.0 * q * (self.oVsc['DATA']) / self.mass ), dims[[0,3]] )
+			VM   = v^2 * (1 + sgn * (vsc^2 / v^2))
+		
+			;Exclude bins that are below the spacecraft potential
+			;   - Total() will not include NaNs
+			tf_nan = 0B
+			iBad   = Where(VM LT 0, nBad)
+			IF nBad GT 0 THEN BEGIN
+				tf_nan = 1B
+				VM[iBad] = !Values.D_NaN
+			ENDIF
+		ENDELSE
+		
+		;Integrate
+		Vx = Total( Temporary(fx_temp) * v * VM * dv, 2, NAN=tf_nan ) * 1e12
+		Vy = Total( Temporary(fy_temp) * v * VM * dv, 2, NAN=tf_nan ) * 1e12
+		Vz = Total( Temporary(fz_temp) * v * VM * dv, 2, NAN=tf_nan ) * 1e12
+;		Vz = Total( Temporary(fz_temp) * v * (v^2 + sgn*vsc^2) * dv, 2 ) * 1e12
 	
 	ENDIF ELSE BEGIN
 		;V is in m/s while f is in s^3/cm^6
@@ -3171,7 +3602,7 @@ NAME=name
 	;   - Convert density 1/cm^3 -> 1/m^3
 	;   - Convert velocity m/s -> km/s
 	;   - Must negate to convert look angles to angles of incidence
-	oN = 1e6 * self -> Density()
+	oN = 1e6 * self -> Density(GROUND=ground)
 	oV = MrVectorTS( self.oDist['TIMEVAR'], -[[Temporary(Vx)], [Temporary(Vy)], [Temporary(Vz)]] )
 	oV = 1e-3 * oV / oN
 	
@@ -3213,12 +3644,12 @@ NAME=name
 	IF the_error NE 0 THEN BEGIN
 		Catch, /CANCEL
 		MrPrintF, 'LogErr'
-		IF N_Elements(oDist3D) GT 0 THEN Obj_Destroy, oDist3D
-		IF N_Elements(odV)      GT 0 THEN Obj_Destroy, odV
+		IF N_Elements(odV) GT 0 THEN Obj_Destroy, odV
 		RETURN, !Null
 	ENDIF
 	
 	;Defaults
+	eV2J     = MrConstants('eV2J')
 	tf_cache = Keyword_Set(cache)
 	IF N_Elements(name) EQ 0 THEN name = self.oDist.name + '_dV'
 
@@ -3230,22 +3661,40 @@ NAME=name
 	nEnergy = dims[3]
 	dV    = FltArr( nTime, nPhi, nTheta, nEnergy )
 
-	;Step over each time
-	FOR i = 0, nTime - 1 DO BEGIN
-		oDist3D = self -> GetDist3D(i)
-		
-		;Reduce the distribution
-		dV[i,*,*,*] = oDist3D -> VolumeElement()
-
-		;Destroy the object
-		Obj_Destroy, oDist3D
-	ENDFOR
+;-----------------------------------------------------
+; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	oPhi  = self.oDist['DEPEND_1']
+	oDPhi = (oPhi['DELTA_PLUS_VAR'] + oPhi['DELTA_MINUS_VAR'])
 	
-	;Energy-time spectrogram
-	odV = MrTimeSeries( self.oDist['TIMEVAR'], dV, $
-	                    CACHE = tf_cache, $
-	                    NAME  = name, $
-	                    /NO_COPY )
+	oTheta  = self.oDist['DEPEND_2']
+	oDTheta = (oTheta['DELTA_PLUS_VAR'] + oTheta['DELTA_MINUS_VAR'])
+	
+	oE  = self.oDist['DEPEND_3']
+	oDE = oE['DELTA_PLUS_VAR'] + oE['DELTA_MINUS_VAR']
+	v   = Sqrt( 2.0 * eV2J / self.mass * oE['DATA'] )
+	dv  = oDE['DATA'] * eV2J / (self.mass * v)
+	
+	;Volume
+	;   - dV = v^2 Sin(theta) dv dTheta dPhi
+	IF self.elevation THEN BEGIN
+		dV = Rebin(Reform(v^2,                       nTime,    1,      1, nEnergy), nTime, nPhi, nTheta, nEnergy) $
+		   * Rebin(Reform(Cos(oTheta['DATA']*!DToR), nTime,    1, nTheta,       1), nTime, nPhi, nTheta, nEnergy) $
+		   * Rebin(Reform(dv,                        nTime,    1,      1, nEnergy), nTIme, nPhi, nTheta, nEnergy) $
+		   * Rebin(Reform(oDTheta['DATA']*!DToR,     nTime,    1, nTheta,       1), nTIme, nPhi, nTheta, nEnergy) $
+		   * Rebin(Reform(oDPhi['DATA']*!DToR,       nTime, nPhi,      1,       1), nTIme, nPhi, nTheta, nEnergy)
+	ENDIF ELSE BEGIN
+		dV = Rebin(Reform(v^2,                       nTime,    1,      1, nEnergy), nTime, nPhi, nTheta, nEnergy) $
+		   * Rebin(Reform(Sin(oTheta['DATA']*!DToR), nTime,    1, nTheta,       1), nTime, nPhi, nTheta, nEnergy) $
+		   * Rebin(Reform(dv,                        nTime,    1,      1, nEnergy), nTIme, nPhi, nTheta, nEnergy) $
+		   * Rebin(Reform(oDTheta['DATA']*!DToR,     nTime,    1, nTheta,       1), nTIme, nPhi, nTheta, nEnergy) $
+		   * Rebin(Reform(oDPhi['DATA']*!DToR,       nTime, nPhi,      1,       1), nTIme, nPhi, nTheta, nEnergy)
+	ENDELSE
+
+;-----------------------------------------------------
+; Create Variable \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	odV = MrTimeSeries(self.oDist['TIMEVAR'], dV, /NO_COPY)
 	
 	;Attributes
 	self.oDist          -> CopyAttrTo, odV, ['DEPEND_1', 'DEPEND_2', 'DEPEND_3']
@@ -3268,6 +3717,7 @@ PRO MrDist4D__DEFINE
 	Compile_Opt idl2
 	
 	class = { MrDist4D, $
+	          Inherits IDL_Container, $
 	          elevation: 0B, $
 	          mass:      0.0, $
 	          oVsc:      Obj_New(), $

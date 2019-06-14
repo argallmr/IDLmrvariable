@@ -567,8 +567,8 @@ SUFFIX=suffix
 	;
 	;     1) Mark "Epoch" as read before obtaining its attributes
 	;
-	;   This will allow other variables to pull "Epoch" out of cache
-	;   FOR use as a DEPEND_0 attribute. It short-circuits the
+	;   This will allow other variables to pull "Epoch" out of the cache
+	;   for use as a DEPEND_0 attribute. It short-circuits the
 	;   infinite loop by having "Epoch_Plus" pull "Epoch" out of the
 	;   cache instead of cyclically calling MrVar_ReadCDF_ReadVar.
 	;
@@ -948,6 +948,7 @@ VERBOSE=verbose
 			!Null = MrVar_ReadCDF_ReadVar( cdfID, varinq.name, $
 			                               NO_CLOBBER = no_clobber, $
 			                               SUFFIX     = suffix )
+		
 		ENDFOR
 		
 		;Close the data file
@@ -966,7 +967,7 @@ VERBOSE=verbose
 		cache_vnames = cache_vnames[0:cdf_vcount-1]
 	ENDELSE
 	support_vnames = support_vnames[0:support_vcount-1]
-
+	
 ;-----------------------------------------------------
 ; Finish Up \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------

@@ -97,6 +97,8 @@
 ; :History:
 ;   Modification History::
 ;       2017/02/11  -   Written by Matthew Argall
+;       2018/05/24  -   Removed the IDX parameter to maintain time dependence of the
+;                           distribution function. - MRA
 ;-
 ;*****************************************************************************************
 ;+
@@ -246,7 +248,7 @@ END
 ;   Convert energy to velocity.
 ;
 ; :Params:
-;       ODIST:      in, required, type=string/integer/objref
+;       ODIST:      in, required, type=objref
 ;                   Convert the energy variable to velocity.
 ;-
 PRO MrVar_Dist2D_Prep_E2V, oDist, mass
@@ -265,7 +267,7 @@ PRO MrVar_Dist2D_Prep_E2V, oDist, mass
 	;
 
 	;Get energy
-	oEnergy = MrVar_Get(oDist['DEPEND_0'])
+	oEnergy = MrVar_Get(oDist['DEPEND_1'])
 	
 	;Conversion factor of energy units to SI (Joules)
 	IF oEnergy -> HasAttr('SI_CONVERSION') THEN BEGIN
@@ -293,7 +295,7 @@ PRO MrVar_Dist2D_Prep_E2V, oDist, mass
 	oV['SI_CONVERSION'] = '1e3>m/s'
 	
 	;Store as dependent variable
-	oDist['DEPEND_0'] = oV
+	oDist['DEPEND_1'] = oV
 
 ;-------------------------------------------
 ; Velocity Deltas //////////////////////////
@@ -370,7 +372,7 @@ PRO MrVar_Dist2D_Prep_Deg2Rad, oDist
 	Compile_Opt idl2
 	On_Error, 2
 	
-	oDep1   = MrVar_Get(oDist['DEPEND_1'])
+	oDep1   = MrVar_Get(oDist['DEPEND_2'])
 	deg2rad = !pi / 180.0
 	
 ;-------------------------------------------
@@ -403,8 +405,10 @@ PRO MrVar_Dist2D_Prep_Deg2Rad, oDist
 	
 	;No units
 	ENDIF ELSE BEGIN
-		MrPrintF, 'LogWarn', 'No angle units provided. Assuming radians.'
-		oPhi = oDep1
+		MrPrintF, 'LogWarn', 'No angle units provided. Assuming degrees.'
+		tf_deg2rad    = 1B
+		oPhi          = oDep1 * deg2rad
+		oDep1        -> CopyAttrTo, oPhi
 		oPhi['UNITS'] = 'radians'
 	ENDELSE
 
@@ -446,6 +450,42 @@ PRO MrVar_Dist2D_Prep_Deg2Rad, oDist
 			oPhi['DELTA_MINUS'] = oPhi['DELTA_MINUS'] * deg2rad
 		ENDIF
 	ENDIF
+END
+
+
+;+
+;   Convert a distribution from [phi,energy] to [energy,phi]. If the input distribution
+;   is also time-dependent, a single distribution is extracted.
+;
+; :Params:
+;       ODISTIN:    in, required, type=objref
+;                   A MrTimeSeries object containing a distribution function
+;                       to be displayed. Dimensions should be ordered as
+;                       [time, azimuth, energy], with the time dimension being optional.
+;                       Also must have corresponding DEPEND_[0-2] attributes.
+;
+; :Returns:
+;       oDist:      out, required, type=object
+;                   A MrTimeSeries object containing a distribution function
+;                       to be displayed. Dimensions should be ordered as
+;                       [time, energy, azimuth]
+;-
+FUNCTION MrVar_Dist2D_Prep_Transpose, oDistIn
+	Compile_Opt idl2
+	On_Error, 2
+	
+	;Transpose Data
+	oDist = oDistIn -> Copy()
+	oDist -> SetData, Transpose(oDist['DATA'], [0,2,1])
+	
+	;Swap dependent variables
+	oPhi    = oDist['DEPEND_1']
+	oEnergy = oDist['DEPEND_2']
+	oDist['DEPEND_1'] = oEnergy
+	oDist['DEPEND_2'] = oPhi
+	
+	;Done
+	RETURN, oDist
 END
 
 
@@ -518,12 +558,13 @@ POLAR=polar
 ;-------------------------------------------
 	
 	;Pick the desired distribution
-	oDist = MrVar_Dist2D_Prep_Pick(oDistIn, idx)
+;	oDist = MrVar_Dist2D_Prep_Pick(oDistIn, idx)
+	oDist = MrVar_Dist2D_Prep_Transpose(oDistIn)
 	
 	;Convert E to V
 	IF tf_velocity THEN MrVar_Dist2D_Prep_E2V, oDist, mass
 
-	;Conver Degrees to Radians
+	;Convert Degrees to Radians
 	MrVar_Dist2D_Prep_Deg2Rad, oDist
 
 ;-------------------------------------------

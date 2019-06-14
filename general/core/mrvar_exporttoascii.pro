@@ -160,7 +160,7 @@ CLOBBER=clobber
 		file = nDep0 EQ 1 ? filename : filename + '_' + String(i, FORMAT='(i0)')
 		OpenW, lun, file+'.txt', /GET_LUN
 		
-		;Write each line individually		
+		;Write each line individually
 		oDep0 = (vars[iVars[0]])['DEPEND_0']
 		FOR j = 0, N_Elements(oDep0) - 1 DO BEGIN
 			;Grab the data

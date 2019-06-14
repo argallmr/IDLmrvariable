@@ -71,6 +71,8 @@
 ;       2016/05/27  -   Written by Matthew Argall
 ;       2016/10/22  -   Convert to and from Julday and SSM. - MRA
 ;       2017/10/24  -   Prevent index out of range errors in ::Nearest_Neighbor. - MRA
+;       2019/02/08  -   If an ISO time ended in "Z", ::iso2tt2000 was trying to
+;                           convert it to a number. Remove the trailing "Z". - MRA
 ;-
 ;*****************************************************************************************
 ;+
@@ -429,6 +431,8 @@ function MrTimeVar::iso2tt2000, iso
 	;   - 00.1 would turn into 00.001 without two trailing zeros.
 	seconds = strmid(iso, 17)
 	if strlen(seconds[0]) le 2 then seconds += '.0'
+	if strmid(seconds[0], strlen(seconds[0])-1) EQ 'Z' $
+		then seconds = strmid(seconds, 0, strlen(seconds[0])-1)
 	seconds += '000000000'
 	
 	;Compute TT2000 times

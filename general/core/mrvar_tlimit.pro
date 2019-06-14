@@ -71,6 +71,13 @@
 ;                           been establish, the program will exit without altering the
 ;                           data.
 ;
+; :Keywords:
+;       FLAG:           out, optional, type=byte
+;                       Flag indicating problems limiting time range.
+;                           0   - Ok
+;                           2^0 - No data in time range (closest two selected)
+;                           2^1 - One data point in time range (it and next closest selected)
+;
 ; :Author:
 ;   Matthew Argall::
 ;       University of New Hampshire
@@ -86,8 +93,11 @@
 ;                           do not have to exist in the cache. - MRA
 ;       2017-05-03  -   If no time range has been established via the `TRANGE` parameter
 ;                           or MrVar_SetTRange, silently return. - MRA
+;       2018-04-08  -   Data variables can be MrTimeVar objects. - MRA
+;       2019-03-30  -   Added the FLAG keyword. - MRA
 ;-
-PRO MrVar_TLimit, variables, trange
+PRO MrVar_TLimit, variables, trange, $
+FLAG=flag
 	Compile_Opt idl2
 	On_Error, 2
 
@@ -120,25 +130,33 @@ PRO MrVar_TLimit, variables, trange
 ;-----------------------------------------------------
 	;Find epoch variables
 	nTime = 0
-	oTime = ObjArr(nVars)
-	tName = StrArr(nVars)
-	tID   = ULonArr(nVars)
+	oTime = ObjArr(nVars)   ;Time variables
+	iTime = IntArr(nVars)   ;Map data variables to time variables
+	tName = StrArr(nVars)   ;Names of time variables
+	tID   = ULonArr(nVars)  ;Object identifiers of time variables
 	theVars = MrVar_Get(variables)
 
 	;Loop over each variable
 	FOR i = 0, nVars - 1 DO BEGIN
 		;Ensire the variable is valid
 		theVar = theVars[i]
-		IF ~Obj_Valid(theVar) THEN continue
-		
-		;TIME
-		IF Obj_IsA(theVar, 'MrTimeVar') THEN BEGIN
-			tempTime = theVar
+		IF ~Obj_Valid(theVar) THEN BEGIN
+			iTime[i] = -1
+			CONTINUE
+		ENDIF
 		
 		;DATA - Get DEPEND_0 object
-		ENDIF ELSE IF theVar -> HasAttr('DEPEND_0') THEN BEGIN
+		;   - It is possible that a data variable is a MrTimeVar
+		;     object (i.e. it contains data that is of CDF epoch
+		;     format, but is not a time sequence). Therefore,
+		;     check for DATA objects before TIME objects.
+		IF theVar -> HasAttr('DEPEND_0') THEN BEGIN
 			tempTime = MrVar_Get(theVar['DEPEND_0'])
 			IF ~Obj_IsA(tempTime, 'MrTimeVar') THEN CONTINUE
+		
+		;TIME
+		ENDIF ELSE IF Obj_IsA(theVar, 'MrTimeVar') THEN BEGIN
+			tempTime = theVar
 		
 		;NEITHER
 		ENDIF ELSE BEGIN
@@ -147,17 +165,23 @@ PRO MrVar_TLimit, variables, trange
 		
 		;Store the epoch variable
 		heapID = Obj_Valid( tempTime, /GET_HEAP_IDENTIFIER )
-		IF heapID GT 0 THEN BEGIN
-			IF ~MrIsMember( tID, heapID ) THEN BEGIN
+		IF heapID EQ 0 THEN BEGIN
+			iTime[i] = -1
+		ENDIF ELSE BEGIN
+			tf_member = MrIsMember( tID, heapID, iMember )
+			IF tf_member THEN BEGIN
+				iTime[i] = iMember
+			ENDIF ELSE BEGIN
+				iTime[i]     = i
 				oTime[nTime] = tempTime
 				tName[nTime] = tempTime.name
 				tID[nTime]   = heapID
 				nTime       += 1
-			ENDIF
-		ENDIF
+			ENDELSE
+		ENDELSE
 	ENDFOR
-
-	;Return IF no time variables
+	
+	;Return if no time variables
 	IF nTime EQ 0 THEN RETURN
 	
 	;Trim down results
@@ -167,6 +191,7 @@ PRO MrVar_TLimit, variables, trange
 ;-----------------------------------------------------
 ; Loop Over Epoch Variables \\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
+	flag = BytArr(nTime)
 	FOR i = 0, nTime - 1 DO BEGIN
 
 	;-----------------------------------------------------
@@ -193,6 +218,7 @@ PRO MrVar_TLimit, variables, trange
 			MrPrintF, 'LogText', '  Interval: [' + StrJoin(trange, ', ') + ']'
 			MrPrintF, 'LogText', '  Closest:  [' + StrJoin(theTime['DATA', iKeep], ', ') + ']'
 			MrPrintF, 'LogWarn', 'Choosing closest two points.'
+			flag[i] += 2B^0B
 		
 		ENDIF ELSE IF nKeep EQ 1 THEN BEGIN
 			IF t_ssm[iKeep]-trange_ssm[0] LT trange_ssm[0]-t_ssm[iKeep] $
@@ -202,26 +228,27 @@ PRO MrVar_TLimit, variables, trange
 			MrPrintF, 'LogText', '  Interval: [' + StrJoin(trange, ', ') + ']'
 			MrPrintF, 'LogText', '  Closest:  [' + StrJoin(theTime['DATA', iKeep], ', ') + ']'
 			MrPrintF, 'LogWarn', 'Including next closest point.'
+			flag[i] += 2B^1B
 		ENDIF
 
 		;Trim the time data
 		newEpoch  = theTime[iKeep]
 		newEpoch -> SetName, 'TLimit(' + theTime.name + ')'
-
+		
 	;-----------------------------------------------------
 	; Set Data Range \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 	;-----------------------------------------------------
 		FOR j = 0, nVars - 1 DO BEGIN
-			;Skip IF the variable does not have an DEPEND_0 attribute
+			;Skip if the variable does not have an DEPEND_0 attribute
 			theVar = theVars[j]
 			IF ~theVar -> HasAttr('DEPEND_0') THEN continue
 			
-			;Skip IF the DEPEND_0 attribute is not the one we are looking at
+			;Skip if the DEPEND_0 attribute is not the one we are looking at
 			;   - DEPEND_0 may be an object or a variable name
-			IF ~theVar -> IsTimeIdentical( theTime ) THEN continue
+			IF ~theVar['DEPEND_0'] -> IsIdentical( theTime ) THEN continue
 			
 			;Trim the variable data
-			CASE obj_class(theVar) OF
+			CASE Obj_Class(theVar) OF
 				'MRSCALARTS': theVar -> SetData, newEpoch, theVar['DATA',iKeep], DIMENSION=1
 				'MRVECTORTS': theVar -> SetData, newEpoch, theVar['DATA',iKeep,*], DIMENSION=1
 				'MRMATRIXTS': theVar -> SetData, newEpoch, theVar['DATA',iKeep,*,*], DIMENSION=1
@@ -241,11 +268,22 @@ PRO MrVar_TLimit, variables, trange
 						ELSE: Message, 'Variable has unexpected number of dimensions: "' + theVar.name + '".'
 					ENDCASE
 				ENDCASE
+				'MRTIMEVAR': BEGIN
+					theVar -> SetData, theVar['DATA',iKeep]
+					theVar['DEPEND_0'] = newEpoch
+				ENDCASE
 				
 				;TODO: Determine which is the time-varying dimension
-				'MrVariable': MrPrintF, 'LogWarn', 'TLimit not possible for object class MrVariable.'
+				'MRVARIABLE': MrPrintF, 'LogWarn', 'TLimit not possible for object class MrVariable.'
 				ELSE: MrPrintF, 'LogWarn', 'Unknown object of class "' + Obj_Class(theVar) + '".'
 			ENDCASE
 		ENDFOR
 	ENDFOR
+
+;-----------------------------------------------------
+; Unconvolve FLAG \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
+;-----------------------------------------------------
+	flag = flag[iTime]
+	idx  = Where(iTime EQ -1, count)
+	IF count GT 0 THEN flag[idx] = 0B
 END

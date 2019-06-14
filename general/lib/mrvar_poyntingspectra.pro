@@ -99,9 +99,11 @@
 ;-
 FUNCTION MrVar_PoyntingSpectra, E, B, nfft, nshift, $
 CACHE=cache, $
+DRIFT=drift, $
 NAME=name, $
 NO_CLOBBER=no_clobber, $
 S_MIN=s_min, $
+B_MIN=b_min, $
 SPHERE=sphere, $
 WINDOW=win
 	Compile_Opt idl2
@@ -113,8 +115,9 @@ WINDOW=win
 		RETURN, !Null
 	ENDIF
 	
+	tf_drift  = Keyword_Set(drift)
 	tf_sphere = Keyword_Set(sphere)
-	IF N_Elements(name)   EQ 0 THEN name   = 'Poynting_Spectra'
+	IF N_Elements(name)   EQ 0 THEN name   = tf_drift ? 'Drift_Velocity_Spectra' : 'Poynting_Spectra'
 	IF N_Elements(nfft)   EQ 0 THEN nfft   = 256
 	IF N_Elements(nshift) EQ 0 THEN nshIFt = nfft / 4
 	
@@ -132,6 +135,9 @@ WINDOW=win
 	;Take the FFT
 	E_fft = oE -> FFT( nfft, nshift, /ONE_SIDED, WINDOW=win )
 	B_fft = oB -> FFT( nfft, nshift, /ONE_SIDED, WINDOW=win )
+	
+	pE = E_fft['PTR']
+	pB = B_fft['PTR']
 
 ;-----------------------------------------------------
 ; Calculate Poynting Vector \\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -146,20 +152,28 @@ WINDOW=win
 	;   IF not in MKS units, mV/m * nT resuLTs an answer 1e+12 too big. Therefore, muLTiply
 	;   by 1e-12 to convert to W/m^2 and another 1e+6 to convert to micro-W/m^2. In total,
 	;   that means we have to muLTiply by 1e-6.
-	coeff = 1.0 / (4.0 * MrConstants('mu_0') * 1.0e6)
+	
+	
+	IF tf_drift THEN BEGIN
+		dims  = Size(*pB, /DIMENSIONS)
+		bsqr  = Total(Real_Part(Conj(*pB)*(*pB)), 3)
+		coeff = Rebin(1e3 / bsqr, dims)
+	ENDIF ELSE BEGIN
+		coeff = 1.0 / (4.0 * MrConstants('mu_0') * 1.0e6)
+	ENDELSE
 
 	;Sx = 1/(4u) * [(Ey*Bz - Ez*By) + (EyBz* - EzBy*)]
-	Sx = Conj(E_fft['DATA',*,*,1])*B_fft['DATA',*,*,2] - Conj(E_fft['DATA',*,*,2])*B_fft['DATA',*,*,1] + $
-	     E_fft['DATA',*,*,1]*Conj(B_fft['DATA',*,*,2]) - E_fft['DATA',*,*,2]*Conj(B_fft['DATA',*,*,1])
+	Sx = Conj((*pE)[*,*,1]) * (*pB)[*,*,2] - Conj((*pE)[*,*,2]) * (*pB)[*,*,1] + $
+	     (*pE)[*,*,1] * Conj((*pB)[*,*,2]) - (*pE)[*,*,2] * Conj((*pB)[*,*,1])
 	
 	;Sy = 1/(4u) * [(Ez*Bx - Ex*Bz) + (EzBx* - ExBz*)]
-	Sy = Conj(E_fft['DATA',*,*,2])*B_fft['DATA',*,*,0] - Conj(E_fft['DATA',*,*,0])*B_fft['DATA',*,*,2] + $
-	     E_fft['DATA',*,*,2]*Conj(B_fft['DATA',*,*,0]) - E_fft['DATA',*,*,0]*Conj(B_fft['DATA',*,*,2])
+	Sy = Conj((*pE)[*,*,2]) * (*pB)[*,*,0] - Conj((*pE)[*,*,0]) * (*pB)[*,*,2] + $
+	     (*pE)[*,*,2] * Conj((*pB)[*,*,0]) - (*pE)[*,*,0] * Conj((*pB)[*,*,2])
 
 	;Sz = 1/(4u) * [(Ex*By - Ey*Bx) + (ExBy* - EyBx*)]
-	Sz = Conj(E_fft['DATA',*,*,0])*B_fft['DATA',*,*,1] - Conj(E_fft['DATA',*,*,1])*B_fft['DATA',*,*,0] + $
-	     E_fft['DATA',*,*,0]*Conj(B_fft['DATA',*,*,1]) - E_fft['DATA',*,*,1]*Conj(B_fft['DATA',*,*,0])
-
+	Sz = Conj((*pE)[*,*,0]) * (*pB)[*,*,1] - Conj((*pE)[*,*,1]) * (*pB)[*,*,0] + $
+	     (*pE)[*,*,0] * Conj((*pB)[*,*,1]) - (*pE)[*,*,1] * Conj((*pB)[*,*,0])
+	
 	;MuLTiply by the coefficient
 	Sx *= coeff
 	Sy *= coeff
@@ -179,10 +193,21 @@ WINDOW=win
 		iBad = Where(Abs(Sz) LT s_min, nBad)
 		IF nBad GT 0 THEN Sz[iBad] = !values.f_nan
 	ENDIF
+	
+	IF N_Elements(b_min) GT 0 THEN BEGIN
+		iBad = Where(Rebin(bsqr, dims) LT b_min, nBad)
+		IF nBad GT 0 THEN BEGIN
+			Sx[iBad] = !values.f_nan
+			Sy[iBad] = !values.f_nan
+			Sz[iBad] = !values.f_nan
+		ENDIF
+	ENDIF
 
 ;-----------------------------------------------------
 ; Spherical Coordinates \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
+	param = tf_drift ? 'V$\downD$' : 'S'
+	
 	IF tf_sphere THEN BEGIN
 		;Allocate memory
 		dims   = size(Sx, /DIMENSIONS)
@@ -212,9 +237,15 @@ WINDOW=win
 		Sz = !RaDeg * ACos( Temporary(Sz_hat) )
 		
 		;Axis labels
-		labels = ['|S|', 'S$\phi$', 'S$\theta$']
+		desc   = 'Poynting Flux'
+		labels = ['|'+param+'|', param+'$\phi$', param+'$\theta$']
+		title  = labels + '!C' + '($\mu$W/m$\up2$)'
+		units  = '\mu W/m^2'
 	ENDIF ELSE BEGIN
-		labels = ['Sx', 'Sy', 'Sz']
+		desc   = 'Drift Velodity'
+		labels = param + ['x', 'y', 'z']
+		title  = labels + '!C' + '(km/s)'
+		units  = 'km/s'
 	ENDELSE
 
 ;-----------------------------------------------------
@@ -243,53 +274,53 @@ WINDOW=win
 	
 	;SX
 	oSx['DEPEND_1']      = B_fft['DEPEND_1']
-	oSx['CATDESC']       = 'Poynting Flux as a function of frequency'
+	oSx['CATDESC']       = desc + ' as a function of frequency'
 	oSx['MISSING_COLOR'] = 'Grey'
 	oSx['MISSING_VALUE'] = !values.f_nan
-	oSx['PLOT_TITLE']    = 'Poynting Flux Spectrogram'
+	oSx['PLOT_TITLE']    = desc + ' Spectrogram'
 	oSx['RGB_TABLE']     = 67
 	oSx['SCALE']         = 1B
-	oSx['UNITS']         = '\mu W/m^2'
-	oSx['TITLE']         = 'Sx!C$\mu$W/m$\up2$'
+	oSx['UNITS']         = units
+	oSx['TITLE']         = title[0]
 
 	;SY
 	oSy['DEPEND_1']      = B_fft['DEPEND_1']
-	oSy['CATDESC']       = 'Poynting Flux as a function of frequency'
+	oSy['CATDESC']       = desc + ' as a function of frequency'
 	oSy['MISSING_COLOR'] = 'Grey'
 	oSy['MISSING_VALUE'] = !values.f_nan
-	oSy['PLOT_TITLE']    = 'Poynting Flux Spectrogram'
+	oSy['PLOT_TITLE']    = desc + ' Spectrogram'
 	oSy['RGB_TABLE']     = 67
 	oSy['SCALE']         = 1B
-	oSy['UNITS']         = '\mu W/m^2'
-	oSy['TITLE']         = 'Sy!C$\mu$W/m$\up2$'
+	oSy['UNITS']         = units
+	oSy['TITLE']         = title[1]
 
 	;SZ
 	oSz['DEPEND_1']      = B_fft['DEPEND_1']
-	oSz['CATDESC']       = 'Poynting Flux as a function of frequency'
+	oSz['CATDESC']       = desc + ' as a function of frequency'
 	oSz['MISSING_COLOR'] = 'Grey'
 	oSz['MISSING_VALUE'] = !values.f_nan
-	oSz['PLOT_TITLE']    = 'Poynting Flux Spectrogram'
+	oSz['PLOT_TITLE']    = desc + ' Spectrogram'
 	oSz['RGB_TABLE']     = 67
 	oSz['SCALE']         = 1B
-	oSz['UNITS']         = '\mu W/m^2'
-	oSz['TITLE']         = 'Sz!C$\mu$W/m$\up2$'
+	oSz['UNITS']         = units
+	oSz['TITLE']         = title[2]
 
 	;SPHERE-specific properties
 	IF tf_sphere THEN BEGIN
 		oSx['LOG']       = 1
 		oSx['RGB_TABLE'] = 13
-		oSx['TITLE']     = '|S|!C$\mu$W/m$\up2$/Hz'
+		oSx['TITLE']     = '|' + param + '|' + '!C' + (tf_drift ? '(km/s)' : '($\mu$W/m$\up2$/Hz)')
 		
 		oSy['AXIS_RANGE']   = [-180.0, 180.0]
 		oSy['TICKINTERVAL'] = 180
 		oSy['MINOR']        = 3
-		oSy['TITLE']        = 'S$\phi$!C(Deg)'
+		oSy['TITLE']        = param + '$\phi$!C(Deg)'
 		oSy['UNITS']        = 'degrees'
 		
 		oSz['AXIS_RANGE']   = [0.0, 180.0]
 		oSz['TICKINTERVAL'] = 90.0
 		oSz['RGB_TABLE']    = 13
-		oSz['TITLE']        = 'S$\theta$!C(Deg)'
+		oSz['TITLE']        = param + '$\theta$!C(Deg)'
 		oSz['UNITS']        = 'degrees'
 		
 		;Angles do not mean anything without power

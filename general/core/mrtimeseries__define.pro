@@ -2940,10 +2940,8 @@ ZEROPAD=zeropad
 	On_Error, 2
 	
 	;Range
-	IF N_Elements(range)  EQ 0 THEN range  = [0, (self -> GetNPts()) - 1]
-	IF Size(range, /TNAME) EQ 'STRING' $
-		THEN irange = self -> Value_Locate(range) $
-		ELSE irange = range
+	irange = N_Elements(range) EQ 0 ? [0, (self -> GetNPts()) - 1] : range
+	IF Size(irange, /TNAME) EQ 'STRING' THEN irange = self -> Value_Locate(range)
 	nPts = irange[1] - irange[0] + 1
 	
 	dim          = 1
@@ -2965,21 +2963,21 @@ ZEROPAD=zeropad
 ; Extract Data /////////////////////////////////////////
 ;-------------------------------------------------------
 	;Time
-	time = self.oTime['DATA', irange[0]:irange[1], 'SSM']
+;	time = self.oTime['DATA', irange[0]:irange[1], 'SSM']
 	
 	;Data
 	ndims = Size(*self.data, /N_DIMENSIONS)
-	CASE ndims OF
-		1: data = (*self.data)[irange[0]:irange[1]]
-		2: data = (*self.data)[irange[0]:irange[1],*]
-		3: data = (*self.data)[irange[0]:irange[1],*,*]
-		4: data = (*self.data)[irange[0]:irange[1],*,*,*]
-		5: data = (*self.data)[irange[0]:irange[1],*,*,*,*]
-		6: data = (*self.data)[irange[0]:irange[1],*,*,*,*,*]
-		7: data = (*self.data)[irange[0]:irange[1],*,*,*,*,*,*]
-		8: data = (*self.data)[irange[0]:irange[1],*,*,*,*,*,*,*]
-		ELSE: Message, 'Incorrect number OF dimensions: SELF.'
-	ENDCASE
+;	CASE ndims OF
+;		1: data = (*self.data)[irange[0]:irange[1]]
+;		2: data = (*self.data)[irange[0]:irange[1],*]
+;		3: data = (*self.data)[irange[0]:irange[1],*,*]
+;		4: data = (*self.data)[irange[0]:irange[1],*,*,*]
+;		5: data = (*self.data)[irange[0]:irange[1],*,*,*,*]
+;		6: data = (*self.data)[irange[0]:irange[1],*,*,*,*,*]
+;		7: data = (*self.data)[irange[0]:irange[1],*,*,*,*,*,*]
+;		8: data = (*self.data)[irange[0]:irange[1],*,*,*,*,*,*,*]
+;		ELSE: Message, 'Incorrect number OF dimensions: SELF.'
+;	ENDCASE
 	
 	;New dimension sizes
 	dims = Size(*self.data, /DIMENSIONS)
@@ -3014,18 +3012,31 @@ ZEROPAD=zeropad
 	N_new  = nfft                                   ;Total number of points in FFT after zero-padding
 	nZeros = 0                                      ;Number of zeros to pad
 	
+	;Zero pad
+	IF tf_zeropad THEN BEGIN
+		;Number of zeros to add
+		IF zeropad EQ 1 THEN BEGIN
+			N_new  = 2^Ceil(ALog2(nfft))
+			nZeros = N_new - nfft
+			IF nZeros EQ 0 then tf_zeropad = 0B
+		ENDIF ELSE BEGIN
+			N_new  = nfft + zeropad
+			nZeros = zeropad
+		ENDELSE
+	ENDIF
+	
 	;Allocate memory
 	;   - Only necessary if more than one FFT is being performed
 	type = tf_double ? 9 : 6
 	IF nMax GT 1 THEN BEGIN
 		IF nDims GT 7 THEN Message, 'DIMENSIONS must be < 7 for sliding FFTs.'
-		outDims = nDims EQ 1 ? [nMax, nfft] : [nMax, nfft, dims[1:*]]
+		outDims = nDims EQ 1 ? [nMax, N_new] : [nMax, N_new, dims[1:*]]
 		dft     = Make_Array( outDims, TYPE=type )
 	ENDIF ELSE BEGIN
-		outDims = nDims EQ 1 ? nfft : [nfft, dims[1:*]]
+		outDims = nDims EQ 1 ? N_new : [N_new, dims[1:*]]
 		dft     = Make_Array( outDims, TYPE=type )
 	ENDELSE
-	freqs     = FltArr(nMax,nfft)
+	freqs     = FltArr(nMax,N_new)
 	dt_median = FltArr(nMax)
 	df_fft    = FltArr(nMax)
 	t_fft     = FltArr(nMax)
@@ -3039,19 +3050,23 @@ ZEROPAD=zeropad
 		;
 		; Place at beginning of loop so that continue
 		; advances interval as well as loop index.
+		; Use NFFT, not N_NEW, because we are indexing
+		; into the non-zero-padded array.
 		;
-	
+		
 		;First interval
 		IF i EQ 0 THEN BEGIN
-			istart = 0
-			iend   = nfft - 1
+;			istart = 0
+			istart = irange[0]
+			iend   = irange[0] + nfft - 1
 		
 		;Last interval
 		;   - Extend backward from the end of the array
 		ENDIF ELSE IF i EQ nMax-1 THEN BEGIN
 			ilast  = iend
-			iend   = nPts - 1
-			istart = nPts - nfft
+;			iend   = nPts - 1
+			iend   = irange[1]
+			istart = iend - nfft + 1
 		
 		;Intermediate intervals
 		;   - Advance forward by NSHIFT
@@ -3064,7 +3079,9 @@ ZEROPAD=zeropad
 	; Compute Sample Interval \\\\\\\\\\\\\\\\\\\\\\\\\\\\
 	;-----------------------------------------------------
 		;Time and sampling interval
-		dtTemp = time[istart+1:iend] - time[istart:iend-1]
+;		ttemp  = time[istart:iend]
+		ttemp  = self.oTime['DATA', istart:iend, 'SSM']
+		dtTemp = ttemp[1:-1] - ttemp[0:-2]
 
 		;Is the sampling interval consistent throughout?
 		;   - A "bad" sampling interval occurs if it is 10% different
@@ -3078,29 +3095,27 @@ ZEROPAD=zeropad
 	;-----------------------------------------------------
 	; Select Data \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 	;-----------------------------------------------------
-		t_temp = time[istart:iend]
-		
 		;Extract the sub-interval
 		CASE ndims OF
-			1: temp = data[istart:iend]
-			2: temp = data[istart:iend,*]
-			3: temp = data[istart:iend,*,*]
-			4: temp = data[istart:iend,*,*,*]
-			5: temp = data[istart:iend,*,*,*,*]
-			6: temp = data[istart:iend,*,*,*,*,*]
-			7: temp = data[istart:iend,*,*,*,*,*,*]
-			8: temp = data[istart:iend,*,*,*,*,*,*,*]
+			1: temp = (*self.data)[istart:iend]
+			2: temp = (*self.data)[istart:iend,*]
+			3: temp = (*self.data)[istart:iend,*,*]
+			4: temp = (*self.data)[istart:iend,*,*,*]
+			5: temp = (*self.data)[istart:iend,*,*,*,*]
+			6: temp = (*self.data)[istart:iend,*,*,*,*,*]
+			7: temp = (*self.data)[istart:iend,*,*,*,*,*,*]
+			8: temp = (*self.data)[istart:iend,*,*,*,*,*,*,*]
 			ELSE: Message, 'Incorrect number OF dimensions: SELF.'
 		ENDCASE
-	
+
 	;-----------------------------------------------------
 	; Detrend \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 	;-----------------------------------------------------
 		IF tf_detrend THEN BEGIN
 			;Single fit
 			IF ndims EQ 1 THEN BEGIN
-				params = LADFit(t_temp, temp)
-				temp   = temp - (params[0] + params[1]*t_temp)
+				params = LADFit(ttemp, temp)
+				temp   = temp - (params[0] + params[1]*ttemp)
 			
 			;Fit each dimension
 			ENDIF ELSE BEGIN
@@ -3110,8 +3125,8 @@ ZEROPAD=zeropad
 				
 				;Detrend each component individually
 				FOR j = 0, dim2 - 1 DO BEGIN
-					params    = LADFit(t_temp, temp[*,j])
-					temp[*,j] = temp - (params[0] + params[1]*t_temp)
+					params    = LADFit(ttemp, temp[*,j])
+					temp[*,j] = temp - (params[0] + params[1]*ttemp)
 				ENDFOR
 				
 				;Return to original size
@@ -3128,25 +3143,14 @@ ZEROPAD=zeropad
 	; Zero Pad \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 	;-----------------------------------------------------
 		
-		;Zero pad
 		IF tf_zeropad THEN BEGIN
-			;Number of zeros to add
-			IF zeropad EQ 1 THEN BEGIN
-				N_new  = 2^Ceil(alog2(nfft))
-				nZeros = N - nfft
-			ENDIF ELSE BEGIN
-				N_new  = nfft + zeropad
-				nZeros = zeropad
-			ENDELSE
-			
-			;Zero pad the data
 			IF ndims GT 1 $
 				THEN temp = [ temp, Replicate(0, [nZeros, dims[1:*]]) ] $
 				ELSE temp = [ temp, Replicate(0, nZeros) ]
 		ENDIF
 		
 		;Increase number of frequencies
-		IF N_new GT nfft THEN freqs = [ [freqs], [FltArr(1,N_new-nfft)] ]
+;		IF N_new GT nfft THEN freqs = [ [freqs], [FltArr(nMax,N_new-nfft)] ]
 		
 	;-----------------------------------------------------
 	; Determine Frequencies \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
@@ -3201,7 +3205,8 @@ ZEROPAD=zeropad
 		df_fft[i]    = 1.0 / (N_new * SI)
 		
 		;Record time stamp
-		t_fft[i]  = time[istart] + (nfft * SI) / 2.0
+;		t_fft[i]  = time[0] + (nfft * SI) / 2.0
+		t_fft[i]  = (ttemp[-1] + ttemp[0]) / 2.0
 		dt_fft[i] = nfft * SI / 2.0
 	ENDFOR
 	
@@ -3966,10 +3971,8 @@ _REF_EXTRA=extra
 	ENDIF
 	
 	;Range
-	IF N_Elements(range)  EQ 0 THEN range  = [0, (self -> GetNPts()) - 1]
-	IF Size(range, /TNAME) EQ 'STRING' $
-		THEN irange = self -> Value_Locate(range) $
-		ELSE irange = range
+	irange = N_Elements(range) EQ 0 ? [0, (self -> GetNPts()) - 1] : range
+	IF Size(irange, /TNAME) EQ 'STRING' THEN irange = self -> Value_Locate(range)
 	
 	;Other defaults
 	tf_rms    = Keyword_Set(rms)
@@ -3995,11 +3998,12 @@ _REF_EXTRA=extra
 ; Normalizations \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
 	;Zero padding
-	zeroNorm = (oFFT['NZEROPAD'] + nfft)^2.0 / Float(nfft)
+	nNew     = nfft + oFFT['NZEROPAD']
+	zeroNorm = nNew^2.0 / Float(nfft)
 	
 	;Tapering window
 	winNorm = Total(oFFT['WINDOW']^2) / nfft
-
+	
 ;-----------------------------------------------------
 ; One-Sided PSD \\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\\
 ;-----------------------------------------------------
@@ -4007,20 +4011,22 @@ _REF_EXTRA=extra
 	tf_ts = IsA(oFFT, 'MrTimeSeries')
 	
 	;Time-Series
+	pFFT = oFFT['PTR']
 	IF tf_ts THEN BEGIN
 		;If a time series, minimum # dims = 2: [time, freq]
 		CASE SiZE(oFFT, /N_DIMENSIONS) OF
-			2: temp = oFFT['DATA',*,0:nfft/2]             * Conj( oFFT['DATA',*,0:nfft/2] )
-			3: temp = oFFT['DATA',*,0:nfft/2,*]           * Conj( oFFT['DATA',*,0:nfft/2,*] )
-			4: temp = oFFT['DATA',*,0:nfft/2,*,*]         * Conj( oFFT['DATA',*,0:nfft/2,*,*] )
-			5: temp = oFFT['DATA',*,0:nfft/2,*,*,*]       * Conj( oFFT['DATA',*,0:nfft/2,*,*,*] )
-			6: temp = oFFT['DATA',*,0:nfft/2,*,*,*,*]     * Conj( oFFT['DATA',*,0:nfft/2,*,*,*,*] )
-			7: temp = oFFT['DATA',*,0:nfft/2,*,*,*,*,*]   * Conj( oFFT['DATA',*,0:nfft/2,*,*,*,*,*] )
-			8: BEGIN
-				fft_data = oFFT -> GetData()
-				temp     = fft_data[*,0:nfft/2,*,*,*,*,*,*] * Conj( fft_data[*,0:nfft/2,*,*,*,*,*,*] )
-				fft_data = !Null
-			ENDCASE
+			2: temp = (*pFFT)[*,0:nNew/2]             * Conj( (*pFFT)[*,0:nNew/2] )
+			3: temp = (*pFFT)[*,0:nNew/2,*]           * Conj( (*pFFT)[*,0:nNew/2,*] )
+			4: temp = (*pFFT)[*,0:nNew/2,*,*]         * Conj( (*pFFT)[*,0:nNew/2,*,*] )
+			5: temp = (*pFFT)[*,0:nNew/2,*,*,*]       * Conj( (*pFFT)[*,0:nNew/2,*,*,*] )
+			6: temp = (*pFFT)[*,0:nNew/2,*,*,*,*]     * Conj( (*pFFT)[*,0:nNew/2,*,*,*,*] )
+			7: temp = (*pFFT)[*,0:nNew/2,*,*,*,*,*]   * Conj( (*pFFT)[*,0:nNew/2,*,*,*,*,*] )
+			8: temp = (*pFFT)[*,0:nNew/2,*,*,*,*,*,*] * Conj( (*pFFT)[*,0:nNew/2,*,*,*,*,*,*] )
+;			8: BEGIN
+;				fft_data = oFFT -> GetData()
+;				temp     = fft_data[*,0:nNew/2,*,*,*,*,*,*] * Conj( fft_data[*,0:nNew/2,*,*,*,*,*,*] )
+;				fft_data = !Null
+;			ENDCASE
 			ELSE: Message, 'FFT must have <= 8 dimensions.'
 		ENDCASE
 	
@@ -4028,18 +4034,19 @@ _REF_EXTRA=extra
 	ENDIF ELSE BEGIN
 		;One-sided
 		CASE SiZE(oFFT, /N_DIMENSIONS) OF
-			1: temp = oFFT['DATA',0:nfft/2]             * Conj( oFFT['DATA',0:nfft/2] )
-			2: temp = oFFT['DATA',0:nfft/2,*]           * Conj( oFFT['DATA',0:nfft/2,*] )
-			3: temp = oFFT['DATA',0:nfft/2,*,*]         * Conj( oFFT['DATA',0:nfft/2,*,*] )
-			4: temp = oFFT['DATA',0:nfft/2,*,*,*]       * Conj( oFFT['DATA',0:nfft/2,*,*,*] )
-			5: temp = oFFT['DATA',0:nfft/2,*,*,*,*]     * Conj( oFFT['DATA',0:nfft/2,*,*,*,*] )
-			6: temp = oFFT['DATA',0:nfft/2,*,*,*,*,*]   * Conj( oFFT['DATA',0:nfft/2,*,*,*,*,*] )
-			7: temp = oFFT['DATA',0:nfft/2,*,*,*,*,*,*] * Conj( oFFT['DATA',0:nfft/2,*,*,*,*,*,*] )
-			8: BEGIN
-				fft_data = oFFT -> GetData()
-				temp     = fft_data[0:nfft/2,*,*,*,*,*,*,*] * Conj( fft_data[0:nfft/2,*,*,*,*,*,*,*] )
-				fft_data = !Null
-			ENDCASE
+			1: temp = (*pFFT)[0:nNew/2]               * Conj( (*pFFT)[0:nNew/2] )
+			2: temp = (*pFFT)[0:nNew/2,*]             * Conj( (*pFFT)[0:nNew/2,*] )
+			3: temp = (*pFFT)[0:nNew/2,*,*]           * Conj( (*pFFT)[0:nNew/2,*,*] )
+			4: temp = (*pFFT)[0:nNew/2,*,*,*]         * Conj( (*pFFT)[0:nNew/2,*,*,*] )
+			5: temp = (*pFFT)[0:nNew/2,*,*,*,*]       * Conj( (*pFFT)[0:nNew/2,*,*,*,*] )
+			6: temp = (*pFFT)[0:nNew/2,*,*,*,*,*]     * Conj( (*pFFT)[0:nNew/2,*,*,*,*,*] )
+			7: temp = (*pFFT)[0:nNew/2,*,*,*,*,*,*]   * Conj( (*pFFT)[0:nNew/2,*,*,*,*,*,*] )
+			8: temp = (*pFFT)[0:nNew/2,*,*,*,*,*,*,*] * Conj( (*pFFT)[0:nNew/2,*,*,*,*,*,*,*] )
+;			8: BEGIN
+;				fft_data = oFFT -> GetData()
+;				temp     = fft_data[0:nNew/2,*,*,*,*,*,*,*] * Conj( fft_data[0:nNew/2,*,*,*,*,*,*,*] )
+;				fft_data = !Null
+;			ENDCASE
 			ELSE: Message, 'FFT must have <= 8 dimensions.'
 		ENDCASE
 	ENDELSE
@@ -4061,13 +4068,14 @@ _REF_EXTRA=extra
 	
 	;Frequency attributes
 	oFreq = tf_ts ? oFFT['DEPEND_1'] : oFFT['DEPEND_0']
-	oFreq['AXIS_RANGE'] = [oFreq['DATA',1], oFreq['DATA',nfft/2]]
+	oFreq['AXIS_RANGE'] = [oFreq['DATA',1], oFreq['DATA',nNew/2]]
 	oFreq['LOG']        = 1B
 	oFreq['TITLE']      = 'Freq (' + oFreq['UNITS'] + ')'
 	
-	oPSD['DEPEND_0'] = oFreq[0:nfft/2]
-	oPSD['TITLE']    = 'PSD'
-	oPSD['LOG']      = 1
+	oPSD['DEPEND_0']  = oFreq[0:nNew/2]
+	oPSD['DIMENSION'] = 1
+	oPSD['TITLE']     = 'PSD'
+	oPSD['LOG']       = 1
 
 	;Normalize
 ;	CASE 1 OF

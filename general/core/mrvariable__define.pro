@@ -1930,7 +1930,8 @@ function MrVariable::_OverloadEQ, left, right
 	;   - oVar -> GetData() is faster than oVar['DATA']
 	if IsMrVariable then begin
 		;Add
-		result = (*self.data) eq (right -> GetData())
+		pRight = right['POINTER']
+		result = (*self.data) eq (*pRight)
 		
 		;Create a new name
 		name = 'EQ(' + self.name + ',' + right.name + ')'
@@ -1943,8 +1944,8 @@ function MrVariable::_OverloadEQ, left, right
 		;   - Assume the user knows what they are doing.
 		;   - All IDL truncation effects apply (shortest in determines size out).
 		if side eq 'LEFT' $
-			then result = (*self.data) eq right['DATA'] $
-			else result = left['DATA'] eq (*self.data)
+			then result = (*self.data) eq right $
+			else result = left eq (*self.data)
 		
 		;Determine name
 		;   - Scalar or TYPE[dims]
